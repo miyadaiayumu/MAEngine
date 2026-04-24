@@ -10,9 +10,11 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <cassert>
+#include <DbgHelp.h>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "Dbghelp.lib")
 
 namespace fs = std::filesystem;
 
@@ -29,18 +31,6 @@ void Log(const std::string& message) {
 		ofs << message << std::endl;
 	}
 }
-
-//std::string ConvertString(const std::wstring& str) {
-//	return std::string(str.begin(), str.end());
-//}
-//
-//void Log(const std::wstring& message) {
-//	Log(ConvertString(message));
-//}
-//
-//std::wstring ConvertString(const std::string& str) {
-//	return std::wstring(str.begin(), str.end());
-//}
 
 std::string GetTimeStringForFile() {
 	auto now = std::chrono::system_clock::now();
@@ -79,6 +69,53 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 }
 
 ID3D12Device* device = nullptr;
+
+LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception)
+{
+	// dumpフォルダ作成
+	fs::create_directories("dumps");
+
+	// ファイル名生成
+	std::string dumpName =
+		"Crash_" + GetTimeStringForFile() + ".dmp";
+
+	fs::path dumpPath =
+		fs::path("dumps") / dumpName;
+
+	HANDLE hFile = CreateFileA(
+		dumpPath.string().c_str(),
+		GENERIC_WRITE,
+		0,
+		nullptr,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL,
+		nullptr
+	);
+
+	if (hFile != INVALID_HANDLE_VALUE)
+	{
+		MINIDUMP_EXCEPTION_INFORMATION dumpInfo{};
+		dumpInfo.ThreadId = GetCurrentThreadId();
+		dumpInfo.ExceptionPointers = exception;
+		dumpInfo.ClientPointers = TRUE;
+
+		MiniDumpWriteDump(
+			GetCurrentProcess(),
+			GetCurrentProcessId(),
+			hFile,
+			MiniDumpNormal,
+			&dumpInfo,
+			nullptr,
+			nullptr
+		);
+
+		CloseHandle(hFile);
+	}
+
+	Log("Crash dump generated.");
+
+	return EXCEPTION_EXECUTE_HANDLER;
+}
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -119,6 +156,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		nullptr,                // メニューハンドル
 		wc.hInstance,           // インスタンスハンドル
 		nullptr);               // オプション
+
+	SetUnhandledExceptionFilter(ExportDump);
 
 	InitLog();
 
