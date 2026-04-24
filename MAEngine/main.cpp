@@ -2,21 +2,59 @@
 #include <cstdint>
 #include<string>
 #include <format>
+#include <filesystem>
+#include <fstream>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+
+namespace fs = std::filesystem;
+
+// ログファイルパスを保持
+fs::path g_logFilePath;
 
 void Log(const std::string& message) {
-	OutputDebugStringA(message.c_str());
+	// デバッグ出力
+	OutputDebugStringA((message + "\n").c_str());
+
+	// ファイル書き込み
+	std::ofstream ofs(g_logFilePath, std::ios::app);
+	if (ofs) {
+		ofs << message << std::endl;
+	}
 }
 
-std::string ConvertString(const std::wstring& str) {
-	return std::string(str.begin(), str.end());
+//std::string ConvertString(const std::wstring& str) {
+//	return std::string(str.begin(), str.end());
+//}
+//
+//void Log(const std::wstring& message) {
+//	Log(ConvertString(message));
+//}
+//
+//std::wstring ConvertString(const std::string& str) {
+//	return std::wstring(str.begin(), str.end());
+//}
+
+std::string GetTimeStringForFile() {
+	auto now = std::chrono::system_clock::now();
+	std::time_t t = std::chrono::system_clock::to_time_t(now);
+
+	std::tm tm{};
+	localtime_s(&tm, &t);
+
+	std::ostringstream oss;
+	oss << std::put_time(&tm, "%Y%m%d_%H%M%S");
+	return oss.str();
 }
 
-void Log(const std::wstring& message) {
-	Log(ConvertString(message));
-}
+void InitLog() {
+	// logsフォルダ作成
+	fs::create_directories("logs");
 
-std::wstring ConvertString(const std::string& str) {
-	return std::wstring(str.begin(), str.end());
+	// logs/20260424_153000.log みたいな名前
+	std::string filename = GetTimeStringForFile() + ".log";
+	g_logFilePath = fs::path("logs") / filename;
 }
 
 // ウィンドウプロシージャー
@@ -73,6 +111,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		nullptr,                // メニューハンドル
 		wc.hInstance,           // インスタンスハンドル
 		nullptr);               // オプション
+
+	InitLog();
+
+	Log("ログ開始");
 
 	// 出力ウィンドへの文字出力
 	OutputDebugStringA("Hello,DirectX!\n");
