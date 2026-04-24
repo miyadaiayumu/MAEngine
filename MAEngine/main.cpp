@@ -1,5 +1,23 @@
 #include <Windows.h>
 #include <cstdint>
+#include<string>
+#include <format>
+
+void Log(const std::string& message) {
+	OutputDebugStringA(message.c_str());
+}
+
+std::string ConvertString(const std::wstring& str) {
+	return std::string(str.begin(), str.end());
+}
+
+void Log(const std::wstring& message) {
+	Log(ConvertString(message));
+}
+
+std::wstring ConvertString(const std::string& str) {
+	return std::wstring(str.begin(), str.end());
+}
 
 // ウィンドウプロシージャー
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -71,6 +89,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 		else {
 			//ゲーム処理
+
+
+
 		}
 	}
 
