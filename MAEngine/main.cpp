@@ -7,6 +7,12 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <cassert>
+
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
 
 namespace fs = std::filesystem;
 
@@ -72,6 +78,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 
 }
 
+ID3D12Device* device = nullptr;
+
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
@@ -119,6 +127,76 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 出力ウィンドへの文字出力
 	OutputDebugStringA("Hello,DirectX!\n");
 
+	// ========================
+	// DXGIファクトリ生成
+	// ========================
+	IDXGIFactory7* dxgiFactory = nullptr;
+	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory));
+	assert(SUCCEEDED(hr));
+
+	// ========================
+	// アダプタ選択
+	// ========================
+	IDXGIAdapter4* useAdapter = nullptr;
+
+	for (UINT i = 0;
+		dxgiFactory->EnumAdapterByGpuPreference(
+			i,
+			DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+			IID_PPV_ARGS(&useAdapter)) != DXGI_ERROR_NOT_FOUND;
+		++i) {
+
+		DXGI_ADAPTER_DESC3 adapterDesc{};
+		hr = useAdapter->GetDesc3(&adapterDesc);
+		assert(SUCCEEDED(hr));
+
+		// ソフトウェアGPUは除外
+		if (!(adapterDesc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE)) {
+			OutputDebugStringW(L"Use Adapter: ");
+			OutputDebugStringW(adapterDesc.Description);
+			OutputDebugStringW(L"\n");
+			break;
+		}
+
+		useAdapter = nullptr;
+	}
+
+	// 見つからなかったら落とす
+	assert(useAdapter != nullptr);
+
+	// ========================
+	// デバイス生成
+	// ========================
+
+	// 機能レベル
+	D3D_FEATURE_LEVEL featureLevels[] = {
+		D3D_FEATURE_LEVEL_12_2,
+		D3D_FEATURE_LEVEL_12_1,
+		D3D_FEATURE_LEVEL_12_0
+	};
+
+	const char* featureLevelStrings[] = {
+		"12.2", "12.1", "12.0"
+	};
+
+	for (size_t i = 0; i < _countof(featureLevels); ++i) {
+		hr = D3D12CreateDevice(
+			useAdapter,
+			featureLevels[i],
+			IID_PPV_ARGS(&device)
+		);
+
+		if (SUCCEEDED(hr)) {
+			Log(std::format("FeatureLevel : {}\n", featureLevelStrings[i]));
+			break;
+		}
+	}
+
+	// 失敗したら即終了
+	assert(device != nullptr);
+
+	Log("Complete create D3D12Device!!\n");
+
 	// ウィンドウを表示する
 	ShowWindow(hwnd, SW_SHOW);
 
@@ -131,9 +209,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 		else {
 			//ゲーム処理
-
-
-
 		}
 	}
 
