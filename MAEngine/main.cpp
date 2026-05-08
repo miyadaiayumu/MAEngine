@@ -1,6 +1,6 @@
 #include <Windows.h>
 #include <cstdint>
-#include<string>
+#include <string>
 #include <format>
 #include <filesystem>
 #include <fstream>
@@ -236,6 +236,124 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Log("Complete create D3D12Device!!\n");
 
+	// コマンドキューを生成する
+	ID3D12CommandQueue* commandQueue = nullptr;
+	D3D12_COMMAND_QUEUE_DESC commandQueueDesc{};
+
+	hr = device->CreateCommandQueue(
+		&commandQueueDesc,
+		IID_PPV_ARGS(&commandQueue)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// コマンドアロケータを生成する
+	ID3D12CommandAllocator* commandAllocator = nullptr;
+
+	hr = device->CreateCommandAllocator(
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		IID_PPV_ARGS(&commandAllocator)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// コマンドリストを生成する
+	ID3D12GraphicsCommandList* commandList = nullptr;
+
+	hr = device->CreateCommandList(
+		0,
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		commandAllocator,
+		nullptr,
+		IID_PPV_ARGS(&commandList)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// スワップチェーンを生成する
+	IDXGISwapChain4* swapChain = nullptr;
+
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
+	swapChainDesc.Width = kClientWidth;
+	swapChainDesc.Height = kClientHeight;
+	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapChainDesc.SampleDesc.Count = 1;
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.BufferCount = 2;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+
+	hr = dxgiFactory->CreateSwapChainForHwnd(
+		commandQueue,
+		hwnd,
+		&swapChainDesc,
+		nullptr,
+		nullptr,
+		reinterpret_cast<IDXGISwapChain1**>(&swapChain)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// RTV用DescriptorHeap
+	ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
+
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvHeapDesc.NumDescriptors = 2;
+
+	hr = device->CreateDescriptorHeap(
+		&rtvHeapDesc,
+		IID_PPV_ARGS(&rtvDescriptorHeap)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// SwapChainのリソース
+	ID3D12Resource* swapChainResources[2] = {};
+
+	hr = swapChain->GetBuffer(
+		0,
+		IID_PPV_ARGS(&swapChainResources[0])
+	);
+	assert(SUCCEEDED(hr));
+
+	hr = swapChain->GetBuffer(
+		1,
+		IID_PPV_ARGS(&swapChainResources[1])
+	);
+	assert(SUCCEEDED(hr));
+
+	// RTV作成
+	D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
+	rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
+
+	rtvHandles[0] =
+		rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+	UINT descriptorSize =
+		device->GetDescriptorHandleIncrementSize(
+			D3D12_DESCRIPTOR_HEAP_TYPE_RTV
+		);
+
+	rtvHandles[1].ptr =
+		rtvHandles[0].ptr + descriptorSize;
+
+	device->CreateRenderTargetView(
+		swapChainResources[0],
+		&rtvDesc,
+		rtvHandles[0]
+	);
+
+	device->CreateRenderTargetView(
+		swapChainResources[1],
+		&rtvDesc,
+		rtvHandles[1]
+	);
+
+
+
 	// ウィンドウを表示する
 	ShowWindow(hwnd, SW_SHOW);
 
@@ -248,6 +366,56 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		}
 		else {
 			//ゲーム処理
+
+			// 現在のBackBuffer番号
+			UINT backBufferIndex =
+				swapChain->GetCurrentBackBufferIndex();
+
+			// 画面色
+			float clearColor[] = {
+				0.4f,
+				0.8f,
+				1.0f,
+				1.0f
+			};
+
+			// RTV設定
+			commandList->OMSetRenderTargets(
+				1,
+				&rtvHandles[backBufferIndex],
+				false,
+				nullptr
+			);
+
+			// 画面クリア
+			commandList->ClearRenderTargetView(
+				rtvHandles[backBufferIndex],
+				clearColor,
+				0,
+				nullptr
+			);
+
+			// コマンド閉じる
+			hr = commandList->Close();
+			assert(SUCCEEDED(hr));
+
+			// GPUへ送る
+			ID3D12CommandList* commandLists[] = {
+				commandList
+			};
+
+			commandQueue->ExecuteCommandLists(
+				1,
+				commandLists
+			);
+
+			// 画面表示
+			swapChain->Present(1, 0);
+
+			// 次フレーム用
+			commandAllocator->Reset();
+			commandList->Reset(commandAllocator, nullptr);
+
 		}
 	}
 
