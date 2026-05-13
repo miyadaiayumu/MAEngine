@@ -250,29 +250,33 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 #ifdef _DEBUG
 	ID3D12InfoQueue* infoQueue = nullptr;
-	//やばいエラー時に止まる
-	infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-	//エラー時に止まる
-	infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-	//警告時に止まる
-	infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
-	//解放
-	infoQueue->Release();
-	//抑制するメッセージのID
-	D3D12_MESSAGE_ID denyIds[] = {
-		//Windows11の中でのDXGIデバックレイヤーとのDX12デバックレイヤーの相互作用バグによるエラーメッセージ
-		//https::stackverflow.com/questions/69805245/directx-12app;ication-15-is-crashing-11
-		D3D12_MESSAGE_ID_RESOURCE_BARRIER_MISMATCHING_COMMAND_LIST_TYPE
-	};
-	//抑制するレベル
-	D3D12_MESSAGE_SEVERITY severities[] = { D3D12_MESSAGE_SEVERITY_INFO };
-	D3D12_INFO_QUEUE_FILTER filter{};
-	filter.DenyList.NumIDs = _countof(denyIds);
-	filter.DenyList.pIDList = denyIds;
-	filter.DenyList.NumSeverities = _countof(severities);
-	filter.DenyList.pSeverityList = severities;
-	//指定したメッセージの表示を抑制する
-	infoQueue->PushStorageFilter(&filter);
+	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+		//やばいエラー時に止まる
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+		//エラー時に止まる
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+		//警告時に止まる
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
+
+		//抑制するメッセージのID
+		D3D12_MESSAGE_ID denyIds[] = {
+			//Windows11の中でのDXGIデバックレイヤーとのDX12デバックレイヤーの相互作用バグによるエラーメッセージ
+			//https::stackverflow.com/questions/69805245/directx-12app;ication-15-is-crashing-11
+			D3D12_MESSAGE_ID_RESOURCE_BARRIER_MISMATCHING_COMMAND_LIST_TYPE
+		};
+		//抑制するレベル
+		D3D12_MESSAGE_SEVERITY severities[] = { D3D12_MESSAGE_SEVERITY_INFO };
+		D3D12_INFO_QUEUE_FILTER filter{};
+		filter.DenyList.NumIDs = _countof(denyIds);
+		filter.DenyList.pIDList = denyIds;
+		filter.DenyList.NumSeverities = _countof(severities);
+		filter.DenyList.pSeverityList = severities;
+		//指定したメッセージの表示を抑制する
+		infoQueue->PushStorageFilter(&filter);
+
+		//解放
+		infoQueue->Release();
+	}
 #endif // _DEBUG
 
 	// コマンドキューを生成する
@@ -402,13 +406,32 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
-		}
-		else {
+		} else {
 			//ゲーム処理
 
 			// 現在のBackBuffer番号
 			UINT backBufferIndex =
 				swapChain->GetCurrentBackBufferIndex();
+
+			// Present → RenderTarget
+			D3D12_RESOURCE_BARRIER barrier{};
+
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+
+			barrier.Transition.pResource =
+				swapChainResources[backBufferIndex];
+
+			barrier.Transition.StateBefore =
+				D3D12_RESOURCE_STATE_PRESENT;
+
+			barrier.Transition.StateAfter =
+				D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+			barrier.Transition.Subresource =
+				D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+			commandList->ResourceBarrier(1, &barrier);
 
 			// 画面色
 			float clearColor[] = {
