@@ -313,6 +313,31 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	assert(SUCCEEDED(hr));
 
+	// ========================
+// Fence生成
+// ========================
+
+	ID3D12Fence* fence = nullptr;
+	uint64_t fenceValue = 0;
+
+	hr = device->CreateFence(
+		fenceValue,
+		D3D12_FENCE_FLAG_NONE,
+		IID_PPV_ARGS(&fence)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// Fence待機用Event
+	HANDLE fenceEvent = CreateEvent(
+		nullptr,
+		FALSE,
+		FALSE,
+		nullptr
+	);
+
+	assert(fenceEvent != nullptr);
+
 	// スワップチェーンを生成する
 	IDXGISwapChain4* swapChain = nullptr;
 
@@ -457,6 +482,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				nullptr
 			);
 
+			// RenderTarget → Present
+			barrier.Transition.StateBefore =
+				D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+			barrier.Transition.StateAfter =
+				D3D12_RESOURCE_STATE_PRESENT;
+
+			commandList->ResourceBarrier(1, &barrier);
+
 			// コマンド閉じる
 			hr = commandList->Close();
 			assert(SUCCEEDED(hr));
@@ -473,6 +507,33 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			// 画面表示
 			swapChain->Present(1, 0);
+
+			// Fence値を更新
+			fenceValue++;
+
+			// GPUにSignalを送る
+			hr = commandQueue->Signal(
+				fence,
+				fenceValue
+			);
+
+			assert(SUCCEEDED(hr));
+
+			// GPUが終わるまで待つ
+			if (fence->GetCompletedValue() < fenceValue) {
+
+				hr = fence->SetEventOnCompletion(
+					fenceValue,
+					fenceEvent
+				);
+
+				assert(SUCCEEDED(hr));
+
+				WaitForSingleObject(
+					fenceEvent,
+					INFINITE
+				);
+			}
 
 			// 次フレーム用
 			commandAllocator->Reset();
