@@ -11,10 +11,12 @@
 #include <dxgi1_6.h>
 #include <cassert>
 #include <DbgHelp.h>
+#include<dxgidebug.h>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "Dbghelp.lib")
+#pragma comment(lib,"dxguid.lib")
 
 namespace fs = std::filesystem;
 
@@ -261,7 +263,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		//抑制するメッセージのID
 		D3D12_MESSAGE_ID denyIds[] = {
 			//Windows11の中でのDXGIデバックレイヤーとのDX12デバックレイヤーの相互作用バグによるエラーメッセージ
-			//https::stackverflow.com/questions/69805245/directx-12app;ication-15-is-crashing-11
+			// https://stackoverflow.com/questions/69805245/directx-12-application-is-crashing-on-windows-11
 			D3D12_MESSAGE_ID_RESOURCE_BARRIER_MISMATCHING_COMMAND_LIST_TYPE
 		};
 		//抑制するレベル
@@ -314,8 +316,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// ========================
-// Fence生成
-// ========================
+	// Fence生成
+	// ========================
 
 	ID3D12Fence* fence = nullptr;
 	uint64_t fenceValue = 0;
@@ -540,6 +542,43 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->Reset(commandAllocator, nullptr);
 
 		}
+	}
+
+	// ========================
+	// 解放
+	// ========================
+
+	swapChainResources[0]->Release();
+	swapChainResources[1]->Release();
+
+	rtvDescriptorHeap->Release();
+
+	swapChain->Release();
+
+	CloseHandle(fenceEvent);
+	fence->Release();
+
+	commandList->Release();
+	commandAllocator->Release();
+	commandQueue->Release();
+
+	device->Release();
+
+	useAdapter->Release();
+	dxgiFactory->Release();
+
+#ifdef _DEBUG
+	debugController->Release();
+#endif
+	CloseWindow(hwnd);
+
+	//リソースリークチェック
+	IDXGIDebug1* debug;
+	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
+		debug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+		debug->ReportLiveObjects(DXGI_DEBUG_APP, DXGI_DEBUG_RLO_ALL);
+		debug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_ALL);
+		debug->Release();
 	}
 
 
