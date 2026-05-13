@@ -117,6 +117,8 @@ LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception)
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
+
+
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
@@ -162,6 +164,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	InitLog();
 
 	Log("ログ開始");
+
+#ifdef _DEBUG
+	ID3D12Debug1* debugController = nullptr;
+	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+		//	デバックレイヤーを有効化する
+		debugController->EnableDebugLayer();
+		//さらにGPU側でもチェックを行うようにする
+		debugController->SetEnableGPUBasedValidation(TRUE);
+	}
+#endif // DEBUG
 
 	// 出力ウィンドへの文字出力
 	OutputDebugStringA("Hello,DirectX!\n");
@@ -235,6 +247,33 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(device != nullptr);
 
 	Log("Complete create D3D12Device!!\n");
+
+#ifdef _DEBUG
+	ID3D12InfoQueue* infoQueue = nullptr;
+	//やばいエラー時に止まる
+	infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+	//エラー時に止まる
+	infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+	//警告時に止まる
+	infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
+	//解放
+	infoQueue->Release();
+	//抑制するメッセージのID
+	D3D12_MESSAGE_ID denyIds[] = {
+		//Windows11の中でのDXGIデバックレイヤーとのDX12デバックレイヤーの相互作用バグによるエラーメッセージ
+		//https::stackverflow.com/questions/69805245/directx-12app;ication-15-is-crashing-11
+		D3D12_MESSAGE_ID_RESOURCE_BARRIER_MISMATCHING_COMMAND_LIST_TYPE
+	};
+	//抑制するレベル
+	D3D12_MESSAGE_SEVERITY severities[] = { D3D12_MESSAGE_SEVERITY_INFO };
+	D3D12_INFO_QUEUE_FILTER filter{};
+	filter.DenyList.NumIDs = _countof(denyIds);
+	filter.DenyList.pIDList = denyIds;
+	filter.DenyList.NumSeverities = _countof(severities);
+	filter.DenyList.pSeverityList = severities;
+	//指定したメッセージの表示を抑制する
+	infoQueue->PushStorageFilter(&filter);
+#endif // _DEBUG
 
 	// コマンドキューを生成する
 	ID3D12CommandQueue* commandQueue = nullptr;
@@ -373,9 +412,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			// 画面色
 			float clearColor[] = {
-				0.4f,
-				0.8f,
-				1.0f,
+				0.2f,
+				0.6f,
+				0.9f,
 				1.0f
 			};
 
