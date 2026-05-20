@@ -267,6 +267,52 @@ struct Vector4 {
 	float w;
 };
 
+struct Material {
+	Vector4 color;
+};
+
+ID3D12Resource* CreateBufferResource(
+	ID3D12Device* d3dDevice,
+	size_t sizeInBytes)
+{
+	// UploadHeap設定
+	D3D12_HEAP_PROPERTIES uploadHeapProperties{};
+	uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+	// Resource設定
+	D3D12_RESOURCE_DESC resourceDesc{};
+
+	resourceDesc.Dimension =
+		D3D12_RESOURCE_DIMENSION_BUFFER;
+
+	resourceDesc.Width = static_cast<UINT64>(sizeInBytes);
+
+	resourceDesc.Height = 1;
+	resourceDesc.DepthOrArraySize = 1;
+	resourceDesc.MipLevels = 1;
+
+	resourceDesc.SampleDesc.Count = 1;
+
+	resourceDesc.Layout =
+		D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	// Resource生成
+	ID3D12Resource* resource = nullptr;
+
+	HRESULT hr = d3dDevice->CreateCommittedResource(
+		&uploadHeapProperties,
+		D3D12_HEAP_FLAG_NONE,
+		&resourceDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&resource)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	return resource;
+}
+
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
@@ -557,6 +603,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	descriptionRootSignature.Flags =
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
+	D3D12_ROOT_PARAMETER rootParameters[1]{};
+
+	rootParameters[0].ParameterType =
+		D3D12_ROOT_PARAMETER_TYPE_CBV;
+
+	rootParameters[0].Descriptor.ShaderRegister = 0;
+
+	rootParameters[0].ShaderVisibility =
+		D3D12_SHADER_VISIBILITY_PIXEL;
+
+	descriptionRootSignature.pParameters = rootParameters;
+	descriptionRootSignature.NumParameters = _countof(rootParameters);
+
+
+
 	ID3DBlob* signatureBlob = nullptr;
 	ID3DBlob* errorBlob = nullptr;
 
@@ -693,48 +754,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// VertexResource
 	// ========================
 
-// 頂点3つ分
+	// 頂点3つ分
 	Vector4 vertices[3] = {
 		{-0.5f, -0.5f, 0.0f, 1.0f}, // 左下
 		{ 0.0f,  0.5f, 0.0f, 1.0f}, // 上
 		{ 0.5f, -0.5f, 0.0f, 1.0f}, // 右下
 	};
 
-	// UploadHeap設定
-	D3D12_HEAP_PROPERTIES uploadHeapProperties{};
-	uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-	// Resource設定
-	D3D12_RESOURCE_DESC vertexResourceDesc{};
-
-	vertexResourceDesc.Dimension =
-		D3D12_RESOURCE_DIMENSION_BUFFER;
-
-	vertexResourceDesc.Width =
-		sizeof(vertices);
-
-	vertexResourceDesc.Height = 1;
-	vertexResourceDesc.DepthOrArraySize = 1;
-	vertexResourceDesc.MipLevels = 1;
-
-	vertexResourceDesc.SampleDesc.Count = 1;
-
-	vertexResourceDesc.Layout =
-		D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-	// VertexResource生成
-	ID3D12Resource* vertexResource = nullptr;
-
-	hr = device->CreateCommittedResource(
-		&uploadHeapProperties,
-		D3D12_HEAP_FLAG_NONE,
-		&vertexResourceDesc,
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(&vertexResource)
-	);
-
-	assert(SUCCEEDED(hr));
+	ID3D12Resource* vertexResource =
+		CreateBufferResource(
+			device,
+			sizeof(Vector4) * 3
+		);
 
 	// ========================
 	// 頂点データを書き込む
@@ -764,6 +795,40 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	vertexBufferView.StrideInBytes =
 		sizeof(Vector4);
+
+	// ========================
+	// MaterialResource
+	// ========================
+
+	// Material用Resource
+
+	ID3D12Resource* materialResource =
+		CreateBufferResource(
+			device,
+			(sizeof(Material) + 0xff) & ~0xff
+		);
+
+	// ========================
+	// Materialデータを書き込む
+	// ========================
+
+	Material* materialData = nullptr;
+
+	materialResource->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&materialData)
+	);
+
+	// 色設定
+	materialData->color = {
+		1.0f,
+		0.0f,
+		0.0f,
+		1.0f
+	};
+
+	assert(SUCCEEDED(hr));
 
 	// スワップチェーンを生成する
 	// 画面表示用のSwapChain
@@ -949,6 +1014,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			commandList->SetPipelineState(graphicsPipelineState);
 
+			// MaterialのCBVをセット
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
 			// トポロジ設定
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -1032,6 +1103,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// VertexResource
 	vertexResource->Release();
+
+	materialResource->Release();
 
 	// PSO
 	graphicsPipelineState->Release();
