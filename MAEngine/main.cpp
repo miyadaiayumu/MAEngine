@@ -10,29 +10,53 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <cassert>
-#include <DbgHelp.h>
+#include <dbghelp.h>
 #include<dxgidebug.h>
+#include<dxcapi.h>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "Dbghelp.lib")
 #pragma comment(lib,"dxguid.lib")
+#pragma comment(lib,"dxcompiler.lib")
 
 namespace fs = std::filesystem;
 
-// ログファイルパスを保持
-fs::path g_logFilePath;
+std::string GetTimeStringForFile();
 
-void Log(const std::string& message) {
-	// デバッグ出力
-	OutputDebugStringA((message + "\n").c_str());
+class Logger {
+public:
 
-	// ファイル書き込み
-	std::ofstream ofs(g_logFilePath, std::ios::app);
-	if (ofs) {
-		ofs << message << std::endl;
+	void Initialize() {
+
+		// logsフォルダ作成
+		fs::create_directories("logs");
+
+		// ファイル名生成
+		std::string filename =
+			GetTimeStringForFile() + ".log";
+
+		fs::path logFilePath =
+			fs::path("logs") / filename;
+
+		// ファイルを開きっぱなしにする
+		logFile_.open(logFilePath, std::ios::app);
 	}
-}
+
+	void Log(const std::string& message) {
+
+		// デバッグ出力
+		OutputDebugStringA((message + "\n").c_str());
+
+		// ファイル出力
+		if (logFile_.is_open()) {
+			logFile_ << message << '\n';
+		}
+	}
+
+private:
+	std::ofstream logFile_;
+};
 
 std::string GetTimeStringForFile() {
 	auto now = std::chrono::system_clock::now();
@@ -46,13 +70,129 @@ std::string GetTimeStringForFile() {
 	return oss.str();
 }
 
-void InitLog() {
-	// logsフォルダ作成
-	fs::create_directories("logs");
+std::string ConvertString(const std::wstring& str) {
 
-	// logs/20260424_153000.log みたいな名前
-	std::string filename = GetTimeStringForFile() + ".log";
-	g_logFilePath = fs::path("logs") / filename;
+	if (str.empty()) {
+		return {};
+	}
+
+	int sizeNeeded = WideCharToMultiByte(
+		CP_UTF8,
+		0,
+		str.data(),
+		(int)str.size(),
+		nullptr,
+		0,
+		nullptr,
+		nullptr
+	);
+
+	std::string result(sizeNeeded, 0);
+
+	WideCharToMultiByte(
+		CP_UTF8,
+		0,
+		str.data(),
+		(int)str.size(),
+		result.data(),
+		sizeNeeded,
+		nullptr,
+		nullptr
+	);
+
+	return result;
+}
+
+Logger logger;
+
+IDxcBlob* CompileShader(
+	const std::wstring& filePath,
+	const wchar_t* profile,
+	IDxcUtils* dxcUtils,
+	IDxcCompiler3* dxcCompiler,
+	IDxcIncludeHandler* includeHandler)
+{
+	logger.Log(ConvertString(
+		std::format(L"Begin CompileShader, path:{}, profile:{}",
+			filePath,
+			profile)
+	));
+
+	// hlslファイルを読む
+	IDxcBlobEncoding* shaderSource = nullptr;
+
+	HRESULT hr = dxcUtils->LoadFile(
+		filePath.c_str(),
+		nullptr,
+		&shaderSource
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// 読み込んだファイルの内容設定
+	DxcBuffer shaderSourceBuffer;
+	shaderSourceBuffer.Ptr = shaderSource->GetBufferPointer();
+	shaderSourceBuffer.Size = shaderSource->GetBufferSize();
+	shaderSourceBuffer.Encoding = DXC_CP_UTF8;
+
+	// Compileする
+	LPCWSTR arguments[] = {
+		filePath.c_str(),
+		L"-E", L"main",
+		L"-T", profile,
+		L"-Zi",
+		L"-Qembed_debug",
+		L"-Od",
+		L"-Zpr",
+	};
+
+	IDxcResult* shaderResult = nullptr;
+
+	hr = dxcCompiler->Compile(
+		&shaderSourceBuffer,
+		arguments,
+		_countof(arguments),
+		includeHandler,
+		IID_PPV_ARGS(&shaderResult)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// Error確認
+	IDxcBlobUtf8* shaderError = nullptr;
+
+	shaderResult->GetOutput(
+		DXC_OUT_ERRORS,
+		IID_PPV_ARGS(&shaderError),
+		nullptr
+	);
+
+	if (shaderError != nullptr &&
+		shaderError->GetStringLength() != 0)
+	{
+		logger.Log(shaderError->GetStringPointer());
+
+		assert(false);
+	}
+
+	// Compile結果取得
+	IDxcBlob* shaderBlob = nullptr;
+
+	hr = shaderResult->GetOutput(
+		DXC_OUT_OBJECT,
+		IID_PPV_ARGS(&shaderBlob),
+		nullptr
+	);
+
+	assert(SUCCEEDED(hr));
+
+	logger.Log("Compile Succeeded");
+
+	// 解放
+	shaderSource->Release();
+	shaderResult->Release();
+
+	return shaderBlob;
 }
 
 // ウィンドウプロシージャー
@@ -71,6 +211,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 }
 
 ID3D12Device* device = nullptr;
+
 
 LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception)
 {
@@ -114,12 +255,17 @@ LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception)
 		CloseHandle(hFile);
 	}
 
-	Log("Crash dump generated.");
+	logger.Log("Crash dump generated.");
 
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
-
+struct Vector4 {
+	float x;
+	float y;
+	float z;
+	float w;
+};
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -163,9 +309,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	SetUnhandledExceptionFilter(ExportDump);
 
-	InitLog();
+	logger.Initialize();
 
-	Log("ログ開始");
+	logger.Log("ログ開始");
 
 #ifdef _DEBUG
 	ID3D12Debug1* debugController = nullptr;
@@ -178,7 +324,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 #endif // DEBUG
 
 	// 出力ウィンドへの文字出力
-	OutputDebugStringA("Hello,DirectX!\n");
+	logger.Log("Hello,DirectX!");
 
 	// ========================
 	// DXGIファクトリ生成
@@ -192,26 +338,42 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	IDXGIAdapter4* useAdapter = nullptr;
 
-	for (UINT i = 0;
-		dxgiFactory->EnumAdapterByGpuPreference(
+	for (UINT i = 0;; ++i) {
+
+		IDXGIAdapter4* adapter = nullptr;
+
+		hr = dxgiFactory->EnumAdapterByGpuPreference(
 			i,
 			DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-			IID_PPV_ARGS(&useAdapter)) != DXGI_ERROR_NOT_FOUND;
-		++i) {
+			IID_PPV_ARGS(&adapter)
+		);
 
-		DXGI_ADAPTER_DESC3 adapterDesc{};
-		hr = useAdapter->GetDesc3(&adapterDesc);
-		assert(SUCCEEDED(hr));
-
-		// ソフトウェアGPUは除外
-		if (!(adapterDesc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE)) {
-			OutputDebugStringW(L"Use Adapter: ");
-			OutputDebugStringW(adapterDesc.Description);
-			OutputDebugStringW(L"\n");
+		if (hr == DXGI_ERROR_NOT_FOUND) {
 			break;
 		}
 
-		useAdapter = nullptr;
+		assert(SUCCEEDED(hr));
+
+		DXGI_ADAPTER_DESC3 adapterDesc{};
+		hr = adapter->GetDesc3(&adapterDesc);
+		assert(SUCCEEDED(hr));
+
+		// ソフトウェアGPU除外
+		if (adapterDesc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE) {
+			adapter->Release();
+			continue;
+		}
+
+		std::wstring adapterMessage =
+			L"Use Adapter: " + std::wstring(adapterDesc.Description);
+
+		OutputDebugStringW((adapterMessage + L"\n").c_str());
+
+		logger.Log(ConvertString(adapterMessage));
+
+		// 採用
+		useAdapter = adapter;
+		break;
 	}
 
 	// 見つからなかったら落とす
@@ -240,7 +402,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		);
 
 		if (SUCCEEDED(hr)) {
-			Log(std::format("FeatureLevel : {}\n", featureLevelStrings[i]));
+			logger.Log(std::format("FeatureLevel : {}", featureLevelStrings[i]));
 			break;
 		}
 	}
@@ -248,7 +410,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 失敗したら即終了
 	assert(device != nullptr);
 
-	Log("Complete create D3D12Device!!\n");
+	logger.Log("Complete create D3D12Device!!");
 
 #ifdef _DEBUG
 	ID3D12InfoQueue* infoQueue = nullptr;
@@ -282,6 +444,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 #endif // _DEBUG
 
 	// コマンドキューを生成する
+	// GPUへコマンドを送信するためのキュー
+	// CommandListはここ経由でGPU実行される
 	ID3D12CommandQueue* commandQueue = nullptr;
 	D3D12_COMMAND_QUEUE_DESC commandQueueDesc{};
 
@@ -293,6 +457,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// コマンドアロケータを生成する
+	// GPUコマンドを記録するためのメモリ管理オブジェクト
+	// CommandListとセットで使用する
 	ID3D12CommandAllocator* commandAllocator = nullptr;
 
 	hr = device->CreateCommandAllocator(
@@ -303,6 +469,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// コマンドリストを生成する
+	// GPUへ送る描画命令を記録するリスト
+	// DrawやBarrierなどの命令をここへ積む
 	ID3D12GraphicsCommandList* commandList = nullptr;
 
 	hr = device->CreateCommandList(
@@ -319,9 +487,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// Fence生成
 	// ========================
 
+	// GPU同期用Fence
+	// CPUがGPUの処理完了を待つために使う
 	ID3D12Fence* fence = nullptr;
+
+	// Fenceの現在値
+	// Signalするたびに増やす
 	uint64_t fenceValue = 0;
 
+	// Fenceオブジェクト生成
+	// CPUとGPUの同期に使用する
 	hr = device->CreateFence(
 		fenceValue,
 		D3D12_FENCE_FLAG_NONE,
@@ -340,7 +515,259 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	assert(fenceEvent != nullptr);
 
+	// ========================
+	// DXC初期化
+	// ========================
+
+	// dxcUtils
+	IDxcUtils* dxcUtils = nullptr;
+
+	hr = DxcCreateInstance(
+		CLSID_DxcUtils,
+		IID_PPV_ARGS(&dxcUtils)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// dxcCompiler
+	IDxcCompiler3* dxcCompiler = nullptr;
+
+	hr = DxcCreateInstance(
+		CLSID_DxcCompiler,
+		IID_PPV_ARGS(&dxcCompiler)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// includeHandler
+	IDxcIncludeHandler* includeHandler = nullptr;
+
+	hr = dxcUtils->CreateDefaultIncludeHandler(
+		&includeHandler
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// ========================
+	// RootSignature
+	// ========================
+
+	D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
+
+	descriptionRootSignature.Flags =
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+	ID3DBlob* signatureBlob = nullptr;
+	ID3DBlob* errorBlob = nullptr;
+
+	hr = D3D12SerializeRootSignature(
+		&descriptionRootSignature,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		&signatureBlob,
+		&errorBlob
+	);
+
+	if (FAILED(hr)) {
+		logger.Log((char*)errorBlob->GetBufferPointer());
+		assert(false);
+	}
+
+	ID3D12RootSignature* rootSignature = nullptr;
+
+	hr = device->CreateRootSignature(
+		0,
+		signatureBlob->GetBufferPointer(),
+		signatureBlob->GetBufferSize(),
+		IID_PPV_ARGS(&rootSignature)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// ========================
+	// InputLayout
+	// ========================
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[1]{};
+
+	inputElementDescs[0].SemanticName = "POSITION";
+	inputElementDescs[0].SemanticIndex = 0;
+	inputElementDescs[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	inputElementDescs[0].AlignedByteOffset =
+		D3D12_APPEND_ALIGNED_ELEMENT;
+
+	D3D12_INPUT_LAYOUT_DESC inputLayoutDesc{};
+	inputLayoutDesc.pInputElementDescs = inputElementDescs;
+	inputLayoutDesc.NumElements = _countof(inputElementDescs);
+
+	// ========================
+	// BlendState
+	// ========================
+
+	D3D12_BLEND_DESC blendDesc{};
+	//	全ての色要素を書き込む
+	blendDesc.RenderTarget[0].RenderTargetWriteMask =
+		D3D12_COLOR_WRITE_ENABLE_ALL;
+
+	// ========================
+	// RasterizerState
+	// ========================
+
+	D3D12_RASTERIZER_DESC rasterizerDesc{};
+
+	rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
+	rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+
+	// ========================
+	// Shader Compile
+	// ========================
+
+	IDxcBlob* vertexShaderBlob = CompileShader(
+		L"Object3d.VS.hlsl",
+		L"vs_6_0",
+		dxcUtils,
+		dxcCompiler,
+		includeHandler
+	);
+
+	IDxcBlob* pixelShaderBlob = CompileShader(
+		L"Object3d.PS.hlsl",
+		L"ps_6_0",
+		dxcUtils,
+		dxcCompiler,
+		includeHandler
+	);
+
+	// ========================
+	// PSO
+	// ========================
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsPipelineStateDesc{};
+
+	graphicsPipelineStateDesc.pRootSignature = rootSignature;
+
+	graphicsPipelineStateDesc.InputLayout = inputLayoutDesc;
+
+	graphicsPipelineStateDesc.VS.pShaderBytecode =
+		vertexShaderBlob->GetBufferPointer();
+
+	graphicsPipelineStateDesc.VS.BytecodeLength =
+		vertexShaderBlob->GetBufferSize();
+
+	graphicsPipelineStateDesc.PS.pShaderBytecode =
+		pixelShaderBlob->GetBufferPointer();
+
+	graphicsPipelineStateDesc.PS.BytecodeLength =
+		pixelShaderBlob->GetBufferSize();
+
+	graphicsPipelineStateDesc.BlendState = blendDesc;
+
+	graphicsPipelineStateDesc.RasterizerState = rasterizerDesc;
+
+	graphicsPipelineStateDesc.NumRenderTargets = 1;
+
+	graphicsPipelineStateDesc.RTVFormats[0] =
+		DXGI_FORMAT_R8G8B8A8_UNORM;
+
+	graphicsPipelineStateDesc.PrimitiveTopologyType =
+		D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+
+	graphicsPipelineStateDesc.SampleDesc.Count = 1;
+
+	graphicsPipelineStateDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
+
+	graphicsPipelineStateDesc.RasterizerState.CullMode =
+		D3D12_CULL_MODE_NONE;
+
+	graphicsPipelineStateDesc.DepthStencilState.DepthEnable = false;
+	graphicsPipelineStateDesc.DepthStencilState.StencilEnable = false;
+
+	ID3D12PipelineState* graphicsPipelineState = nullptr;
+
+	hr = device->CreateGraphicsPipelineState(
+		&graphicsPipelineStateDesc,
+		IID_PPV_ARGS(&graphicsPipelineState)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// ========================
+	// VertexResource
+	// ========================
+
+// 頂点3つ分
+	Vector4 vertices[3] = {
+		{-0.5f, -0.5f, 0.0f, 1.0f}, // 左下
+		{ 0.0f,  0.5f, 0.0f, 1.0f}, // 上
+		{ 0.5f, -0.5f, 0.0f, 1.0f}, // 右下
+	};
+
+	// UploadHeap設定
+	D3D12_HEAP_PROPERTIES uploadHeapProperties{};
+	uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+	// Resource設定
+	D3D12_RESOURCE_DESC vertexResourceDesc{};
+
+	vertexResourceDesc.Dimension =
+		D3D12_RESOURCE_DIMENSION_BUFFER;
+
+	vertexResourceDesc.Width =
+		sizeof(vertices);
+
+	vertexResourceDesc.Height = 1;
+	vertexResourceDesc.DepthOrArraySize = 1;
+	vertexResourceDesc.MipLevels = 1;
+
+	vertexResourceDesc.SampleDesc.Count = 1;
+
+	vertexResourceDesc.Layout =
+		D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	// VertexResource生成
+	ID3D12Resource* vertexResource = nullptr;
+
+	hr = device->CreateCommittedResource(
+		&uploadHeapProperties,
+		D3D12_HEAP_FLAG_NONE,
+		&vertexResourceDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&vertexResource)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	// ========================
+	// 頂点データを書き込む
+	// ========================
+
+	Vector4* vertexData = nullptr;
+
+	vertexResource->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&vertexData)
+	);
+
+	memcpy(vertexData, vertices, sizeof(vertices));
+
+	// ========================
+	// VertexBufferView
+	// ========================
+
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+
+	vertexBufferView.BufferLocation =
+		vertexResource->GetGPUVirtualAddress();
+
+	vertexBufferView.SizeInBytes =
+		sizeof(vertices);
+
+	vertexBufferView.StrideInBytes =
+		sizeof(Vector4);
+
 	// スワップチェーンを生成する
+	// 画面表示用のSwapChain
+	// BackBufferを切り替えながら描画する
 	IDXGISwapChain4* swapChain = nullptr;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
@@ -363,7 +790,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	assert(SUCCEEDED(hr));
 
+
+
 	// RTV用DescriptorHeap
+	// RTV(RenderTargetView)を格納するヒープ
+	// GPUリソースの参照情報を保持する
 	ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
 
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
@@ -378,6 +809,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// SwapChainのリソース
+	// SwapChainが持つBackBufferリソース
+	// ダブルバッファ用
 	ID3D12Resource* swapChainResources[2] = {};
 
 	hr = swapChain->GetBuffer(
@@ -440,7 +873,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			UINT backBufferIndex =
 				swapChain->GetCurrentBackBufferIndex();
 
-			// Present → RenderTarget
+			// GPUリソースは用途ごとに状態管理されるため
+			// 描画前後で状態遷移が必要
+
+			// BackBufferを画面表示用状態(Present)から
+			// 描画可能状態(RenderTarget)へ変更
 			D3D12_RESOURCE_BARRIER barrier{};
 
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -460,6 +897,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			commandList->ResourceBarrier(1, &barrier);
 
+			// Viewport設定
+			D3D12_VIEWPORT viewport{};
+
+			viewport.Width = static_cast<float>(kClientWidth);
+			viewport.Height = static_cast<float>(kClientHeight);
+			viewport.TopLeftX = 0;
+			viewport.TopLeftY = 0;
+			viewport.MinDepth = 0.0f;
+			viewport.MaxDepth = 1.0f;
+
+			commandList->RSSetViewports(1, &viewport);
+
+			// ScissorRect設定
+			D3D12_RECT scissorRect{};
+
+			scissorRect.left = 0;
+			scissorRect.right = kClientWidth;
+			scissorRect.top = 0;
+			scissorRect.bottom = kClientHeight;
+
+			commandList->RSSetScissorRects(1, &scissorRect);
+
 			// 画面色
 			float clearColor[] = {
 				0.2f,
@@ -469,6 +928,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			};
 
 			// RTV設定
+			// 現在描画先として使うRTVを設定
 			commandList->OMSetRenderTargets(
 				1,
 				&rtvHandles[backBufferIndex],
@@ -484,7 +944,22 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				nullptr
 			);
 
-			// RenderTarget → Present
+			// PSO設定
+			commandList->SetGraphicsRootSignature(rootSignature);
+
+			commandList->SetPipelineState(graphicsPipelineState);
+
+			// トポロジ設定
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+			// VertexBuffer設定
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+
+			// 描画
+			commandList->DrawInstanced(3, 1, 0, 0);
+
+			// 描画完了後、RenderTarget状態から
+			// Present状態へ戻す
 			barrier.Transition.StateBefore =
 				D3D12_RESOURCE_STATE_RENDER_TARGET;
 
@@ -502,12 +977,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				commandList
 			};
 
+			// 記録済みコマンドをGPUへ送信
 			commandQueue->ExecuteCommandLists(
 				1,
 				commandLists
 			);
 
-			// 画面表示
+			// BackBufferとFrontBufferを交換して画面表示
+			// 同時に次の描画用Bufferへ切り替わる
 			swapChain->Present(1, 0);
 
 			// Fence値を更新
@@ -538,7 +1015,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 
 			// 次フレーム用
+
+			// GPU実行完了後なので再利用可能
+			// コマンド記録領域をリセット
 			commandAllocator->Reset();
+
+			// コマンドリストを初期状態に戻す
 			commandList->Reset(commandAllocator, nullptr);
 
 		}
@@ -548,31 +1030,68 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 解放
 	// ========================
 
+	// VertexResource
+	vertexResource->Release();
+
+	// PSO
+	graphicsPipelineState->Release();
+
+	// Shader
+	vertexShaderBlob->Release();
+	pixelShaderBlob->Release();
+
+	// RootSignature
+	rootSignature->Release();
+
+	// Blob
+	signatureBlob->Release();
+
+	if (errorBlob) {
+		errorBlob->Release();
+	}
+
+	// DXC
+	includeHandler->Release();
+	dxcCompiler->Release();
+	dxcUtils->Release();
+
+	// SwapChainResources
 	swapChainResources[0]->Release();
 	swapChainResources[1]->Release();
 
+	// RTVHeap
 	rtvDescriptorHeap->Release();
 
+	// SwapChain
 	swapChain->Release();
 
+	// Fence
 	CloseHandle(fenceEvent);
 	fence->Release();
 
+	// Command系
 	commandList->Release();
 	commandAllocator->Release();
 	commandQueue->Release();
 
+	// Device
 	device->Release();
 
+	// Adapter
 	useAdapter->Release();
+
+	// Factory
 	dxgiFactory->Release();
 
 #ifdef _DEBUG
 	debugController->Release();
 #endif
+
 	CloseWindow(hwnd);
 
 	//リソースリークチェック
+	// DXGIデバッグインターフェース取得
+	// 終了時に未解放リソースを出力する
 	IDXGIDebug1* debug;
 	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
 		debug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
