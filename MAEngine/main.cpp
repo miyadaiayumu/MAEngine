@@ -13,6 +13,8 @@
 #include <dbghelp.h>
 #include<dxgidebug.h>
 #include<dxcapi.h>
+#include"Matrix4x4.h"
+#include"Vector3.h"
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -57,6 +59,17 @@ public:
 private:
 	std::ofstream logFile_;
 };
+
+struct Transform {
+	Vector3 scale;
+	Vector3 rotate;
+	Vector3 translate;
+};
+
+//Tranceform変数を作る
+Transform transform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,0.0f,} };
+
+Transform cameraTransform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,-0.5f,} };
 
 std::string GetTimeStringForFile() {
 	auto now = std::chrono::system_clock::now();
@@ -270,6 +283,17 @@ struct Vector4 {
 struct Material {
 	Vector4 color;
 };
+
+Matrix4x4 MakeIdentity4x4() {
+	Matrix4x4 result{};
+
+	result.m[0][0] = 1.0f;
+	result.m[1][1] = 1.0f;
+	result.m[2][2] = 1.0f;
+	result.m[3][3] = 1.0f;
+
+	return result;
+}
 
 ID3D12Resource* CreateBufferResource(
 	ID3D12Device* d3dDevice,
@@ -603,18 +627,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	descriptionRootSignature.Flags =
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-	D3D12_ROOT_PARAMETER rootParameters[1]{};
+	D3D12_ROOT_PARAMETER rootParameters[2]{};
 
 	rootParameters[0].ParameterType =
-		D3D12_ROOT_PARAMETER_TYPE_CBV;
+		D3D12_ROOT_PARAMETER_TYPE_CBV;    //CBVを使う
 
-	rootParameters[0].Descriptor.ShaderRegister = 0;
+	rootParameters[0].Descriptor.ShaderRegister = 0;  //レジスタ番号0を使う
 
 	rootParameters[0].ShaderVisibility =
-		D3D12_SHADER_VISIBILITY_PIXEL;
+		D3D12_SHADER_VISIBILITY_PIXEL;    //PixelShaderで使う
 
-	descriptionRootSignature.pParameters = rootParameters;
-	descriptionRootSignature.NumParameters = _countof(rootParameters);
+	rootParameters[1].ParameterType =
+		D3D12_ROOT_PARAMETER_TYPE_CBV;    //CBVを使う
+
+	rootParameters[1].Descriptor.ShaderRegister = 0;  //レジスタ番号0を使う
+
+	rootParameters[1].ShaderVisibility =
+		D3D12_SHADER_VISIBILITY_VERTEX;    //VertexShaderで使う
+
+	descriptionRootSignature.pParameters = rootParameters;    //ルートパラメータ配列へのポインタ
+	descriptionRootSignature.NumParameters = _countof(rootParameters);    //配列の長さ
 
 
 
@@ -808,6 +840,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			(sizeof(Material) + 0xff) & ~0xff
 		);
 
+	//WVP用のリソースを作る。Matrix4x4 1つ分のサイズを用意する
+	ID3D12Resource* wvpResource =
+		CreateBufferResource(
+			device,
+			(sizeof(Matrix4x4) + 0xff) & ~0xff
+		);
+
+	//データを書き込む
+	Matrix4x4* wvpData = nullptr;
+	//書き込むためのアドレスを取得
+	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
+	//単位行列を書き込んでおく
+	*wvpData = MakeIdentity4x4();
+
 	// ========================
 	// Materialデータを書き込む
 	// ========================
@@ -934,6 +980,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		} else {
 			//ゲーム処理
 
+			transform.rotate.y += 0.03f;
+			
+			Matrix4x4 worldMatrix = Matrix4x4::MakeAffineMatrix(
+				transform.scale,
+				transform.rotate,
+				transform.translate
+			);
+
+			Matrix4x4 cameraMatrix = Matrix4x4::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+
+			Matrix4x4 viewMatrix = Matrix4x4::Inverse(cameraMatrix);
+
+			Matrix4x4 projectionMatrix = Matrix4x4::MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.01f, 100.0f);
+
+			Matrix4x4 worldViewProjectionMatrix = Matrix4x4::Multiply(worldMatrix, Matrix4x4::Multiply(viewMatrix, projectionMatrix));
+
+			*wvpData = worldViewProjectionMatrix;
+			
+
+
 			// 現在のBackBuffer番号
 			UINT backBufferIndex =
 				swapChain->GetCurrentBackBufferIndex();
@@ -1020,6 +1086,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				materialResource->GetGPUVirtualAddress()
 			);
 
+			//wvp用のCBufferの場所を特定
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResource->GetGPUVirtualAddress()
+			);
+
 			// トポロジ設定
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -1053,6 +1125,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				1,
 				commandLists
 			);
+
 
 			// BackBufferとFrontBufferを交換して画面表示
 			// 同時に次の描画用Bufferへ切り替わる
@@ -1155,6 +1228,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// Factory
 	dxgiFactory->Release();
+
+	wvpResource->Release();
 
 #ifdef _DEBUG
 	debugController->Release();
