@@ -15,6 +15,10 @@
 #include<dxcapi.h>
 #include"Matrix4x4.h"
 #include"Vector3.h"
+#include"externals/imgui/imgui.h"
+#include"externals/imgui/imgui_impl_dx12.h"
+#include"externals/imgui/imgui_impl_win32.h"
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -69,7 +73,7 @@ struct Transform {
 //Tranceform変数を作る
 Transform transform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,0.0f,} };
 
-Transform cameraTransform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,-0.5f,} };
+Transform cameraTransform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,-3.0f,} };
 
 std::string GetTimeStringForFile() {
 	auto now = std::chrono::system_clock::now();
@@ -210,6 +214,11 @@ IDxcBlob* CompileShader(
 
 // ウィンドウプロシージャー
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
+		return true;
+	}
+
 	// メッセージに応じてゲーム固有の処理を行う
 	switch (msg) {
 		// ウィンドが破棄された
@@ -336,6 +345,39 @@ ID3D12Resource* CreateBufferResource(
 
 	return resource;
 }
+
+ID3D12DescriptorHeap* CreateDescriptorHeap(
+	ID3D12Device* d3dDevice,
+	D3D12_DESCRIPTOR_HEAP_TYPE heapType,
+	UINT numDescriptors,
+	bool shaderVisible)
+{
+	D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc{};
+
+	descriptorHeapDesc.Type = heapType;
+	descriptorHeapDesc.NumDescriptors = numDescriptors;
+
+	if (shaderVisible) {
+		descriptorHeapDesc.Flags =
+			D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	} else {
+		descriptorHeapDesc.Flags =
+			D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	}
+
+	ID3D12DescriptorHeap* descriptorHeap = nullptr;
+
+	HRESULT hr = d3dDevice->CreateDescriptorHeap(
+		&descriptorHeapDesc,
+		IID_PPV_ARGS(&descriptorHeap)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	return descriptorHeap;
+}
+
+
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -481,6 +523,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(device != nullptr);
 
 	logger.Log("Complete create D3D12Device!!");
+
+	//SRV用のヒープでディスクリプタの数は128。SRVはShaderないで触れるものなので、ShaderVisibleはtrue
+	ID3D12DescriptorHeap* srvDescriptorHeap =
+		CreateDescriptorHeap(
+			device,
+			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+			1,
+			true
+		);
 
 #ifdef _DEBUG
 	ID3D12InfoQueue* infoQueue = nullptr;
@@ -768,7 +819,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	graphicsPipelineStateDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
 
 	graphicsPipelineStateDesc.RasterizerState.CullMode =
-		D3D12_CULL_MODE_NONE;
+		D3D12_CULL_MODE_BACK;
 
 	graphicsPipelineStateDesc.DepthStencilState.DepthEnable = false;
 	graphicsPipelineStateDesc.DepthStencilState.StencilEnable = false;
@@ -967,6 +1018,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	);
 
 
+	// ========================
+	// ImGui初期化
+	// ========================
+
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+
+	ImGui::StyleColorsDark();
+
+	ImGui_ImplWin32_Init(hwnd);
+
+	ImGui_ImplDX12_Init(
+		device,
+		swapChainDesc.BufferCount,
+		rtvDesc.Format,
+		srvDescriptorHeap,
+		srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+		srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart()
+	);
+
+	ImGuiIO& io = ImGui::GetIO();
+	io.Fonts->Build();
 
 	// ウィンドウを表示する
 	ShowWindow(hwnd, SW_SHOW);
@@ -979,6 +1052,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			DispatchMessage(&msg);
 		} else {
 			//ゲーム処理
+
+			ImGui_ImplDX12_NewFrame();
+			ImGui_ImplWin32_NewFrame();
+			ImGui::NewFrame();
+
+			//開発用UIの処理、実際に開発用のUIを出す場合はここをゲーム固有の処理に書き換える
+			ImGui::ShowDemoWindow();
 
 			transform.rotate.y += 0.03f;
 			
@@ -997,8 +1077,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Matrix4x4 worldViewProjectionMatrix = Matrix4x4::Multiply(worldMatrix, Matrix4x4::Multiply(viewMatrix, projectionMatrix));
 
 			*wvpData = worldViewProjectionMatrix;
-			
 
+			ImGui::Render();
 
 			// 現在のBackBuffer番号
 			UINT backBufferIndex =
@@ -1067,6 +1147,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				nullptr
 			);
 
+
 			// 画面クリア
 			commandList->ClearRenderTargetView(
 				rtvHandles[backBufferIndex],
@@ -1074,6 +1155,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				0,
 				nullptr
 			);
+			
+			ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap };
+			commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
 			// PSO設定
 			commandList->SetGraphicsRootSignature(rootSignature);
@@ -1100,6 +1184,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			// 描画
 			commandList->DrawInstanced(3, 1, 0, 0);
+
+			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 
 			// 描画完了後、RenderTarget状態から
 			// Present状態へ戻す
@@ -1174,6 +1260,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 解放
 	// ========================
 
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+
 	// VertexResource
 	vertexResource->Release();
 
@@ -1231,9 +1321,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	wvpResource->Release();
 
+
 #ifdef _DEBUG
 	debugController->Release();
 #endif
+	srvDescriptorHeap->Release();
 
 	CloseWindow(hwnd);
 
