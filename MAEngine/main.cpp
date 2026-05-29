@@ -15,10 +15,13 @@
 #include<dxcapi.h>
 #include"Matrix4x4.h"
 #include"Vector3.h"
+
+#ifdef USE_IMGUI
 #include"externals/imgui/imgui.h"
 #include"externals/imgui/imgui_impl_dx12.h"
 #include"externals/imgui/imgui_impl_win32.h"
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -215,9 +218,11 @@ IDxcBlob* CompileShader(
 // ウィンドウプロシージャー
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 
+#ifdef USE_IMGUI
 	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
 		return true;
 	}
+#endif
 
 	// メッセージに応じてゲーム固有の処理を行う
 	switch (msg) {
@@ -1017,7 +1022,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		rtvHandles[1]
 	);
 
-
+#ifdef USE_IMGUI
 	// ========================
 	// ImGui初期化
 	// ========================
@@ -1040,6 +1045,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	ImGuiIO& io = ImGui::GetIO();
 	io.Fonts->Build();
+#endif
 
 	// ウィンドウを表示する
 	ShowWindow(hwnd, SW_SHOW);
@@ -1053,13 +1059,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		} else {
 			//ゲーム処理
 
+#ifdef USE_IMGUI
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
 
 			//開発用UIの処理、実際に開発用のUIを出す場合はここをゲーム固有の処理に書き換える
 			ImGui::ShowDemoWindow();
-
+#endif
 			transform.rotate.y += 0.03f;
 			
 			Matrix4x4 worldMatrix = Matrix4x4::MakeAffineMatrix(
@@ -1078,8 +1085,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			*wvpData = worldViewProjectionMatrix;
 
+#ifdef USE_IMGUI
 			ImGui::Render();
-
+#endif
 			// 現在のBackBuffer番号
 			UINT backBufferIndex =
 				swapChain->GetCurrentBackBufferIndex();
@@ -1185,7 +1193,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// 描画
 			commandList->DrawInstanced(3, 1, 0, 0);
 
+#ifdef USE_IMGUI
 			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+#endif
 
 			// 描画完了後、RenderTarget状態から
 			// Present状態へ戻す
@@ -1260,9 +1270,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 解放
 	// ========================
 
+#ifdef USE_IMGUI
 	ImGui_ImplDX12_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
+#endif
 
 	// VertexResource
 	vertexResource->Release();
