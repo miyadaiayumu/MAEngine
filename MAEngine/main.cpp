@@ -917,54 +917,92 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// ========================
-	// VertexResource
+	// VertexResource (球体データの設定)
 	// ========================
 
-	// 新しい頂点構造体の定義
+	// 頂点構造体の定義
 	struct VertexData {
 		Vector4 position;
 		Vector2 texcoord;
 	};
 
-	VertexData vertices[6] = {
-		// 1枚目の三角形（既存のもの）
-		{{-0.5f, -0.5f, 0.0f, 1.0f}, {0.0f, 1.0f}}, // 左下
-		{{ 0.0f,  0.5f, 0.0f, 1.0f}, {0.5f, 0.0f}}, // 上
-		{{ 0.5f, -0.5f, 0.0f, 1.0f}, {1.0f, 1.0f}}, // 右下
+	const uint32_t kSubdivision = 16;
+	const uint32_t kVertexCountSphere = kSubdivision * kSubdivision * 6; // 16 * 16 * 6 = 1536
 
-		// 2枚目の三角形（スライド2枚目の座標：1枚目を貫通するように配置）
-		{{-0.5f, -0.5f,  0.5f, 1.0f}, {0.0f, 1.0f}}, // 左下2
-		{{ 0.0f,  0.0f,  0.0f, 1.0f}, {0.5f, 0.0f}}, // 上2
-		{{ 0.5f, -0.5f, -0.5f, 1.0f}, {1.0f, 1.0f}}, // 右下2
-	};
+	// 頂点データを格納する動的配列（vector）を用意
+	std::vector<VertexData> sphereVertices(kVertexCountSphere);
 
+	// 角度の増分を計算 (スライドの仕様通り)
+	const float pi = 3.1415926535f;
+	const float kLonEvery = pi * 2.0f / static_cast<float>(kSubdivision); // 経度分割1つ分の角度
+	const float kLatEvery = pi / static_cast<float>(kSubdivision);        // 緯度分割1つ分の角度
+
+	// 緯度方向に分割してループ
+	for (uint32_t latIndex = 0; latIndex < kSubdivision; ++latIndex) {
+		// 緯度の角度 θ (南極 -pi/2 から 北極 pi/2 まで進む)
+		float lat = -pi / 2.0f + kLatEvery * static_cast<float>(latIndex);
+
+		// 経度方向に分割してループしながら面（2枚の三角形）を構築
+		for (uint32_t lonIndex = 0; lonIndex < kSubdivision; ++lonIndex) {
+			// 経度の角度 φ
+			float lon = static_cast<float>(lonIndex) * kLonEvery;
+
+			// この四角形（a,b,c,d）の書き込み開始インデックスを計算
+			uint32_t start = (latIndex * kSubdivision + lonIndex) * 6;
+
+			// 各増分角度
+			float nextLat = lat + kLatEvery;
+			float nextLon = lon + kLonEvery;
+
+			// 頂点位置の計算
+			Vector4 posA = { cosf(lat) * cosf(lon), sinf(lat), cosf(lat) * sinf(lon), 1.0f };
+			Vector4 posB = { cosf(nextLat) * cosf(lon), sinf(nextLat), cosf(nextLat) * sinf(lon), 1.0f };
+			Vector4 posC = { cosf(lat) * cosf(nextLon), sinf(lat), cosf(lat) * sinf(nextLon), 1.0f };
+			Vector4 posD = { cosf(nextLat) * cosf(nextLon), sinf(nextLat), cosf(nextLat) * sinf(nextLon), 1.0f };
+
+			// Texcoord(UV)の計算
+			float uA = static_cast<float>(lonIndex) / static_cast<float>(kSubdivision);
+			float vA = 1.0f - static_cast<float>(latIndex) / static_cast<float>(kSubdivision);
+
+			float uB = uA;
+			float vB = 1.0f - static_cast<float>(latIndex + 1) / static_cast<float>(kSubdivision);
+
+			float uC = static_cast<float>(lonIndex + 1) / static_cast<float>(kSubdivision);
+			float vC = vA;
+
+			float uD = uC;
+			float vD = vB;
+
+			// 6つの頂点データに書き込み
+			sphereVertices[start + 0] = { posA, { uA, vA } };
+			sphereVertices[start + 1] = { posB, { uB, vB } };
+			sphereVertices[start + 2] = { posC, { uC, vC } };
+
+			sphereVertices[start + 3] = { posB, { uB, vB } };
+			sphereVertices[start + 4] = { posD, { uD, vD } };
+			sphereVertices[start + 5] = { posC, { uC, vC } };
+		}
+	}
+
+	// 1. GPU上に球体用のバッファを確保
 	ID3D12Resource* vertexResource =
 		CreateBufferResource(
 			device,
-			sizeof(VertexData) * 6 // 6頂点分確保
+			sizeof(VertexData) * kVertexCountSphere
 		);
 
-	// ========================
-	// 頂点データを書き込む
-	// ========================
-
+	// 2. CPU側の計算結果(sphereVertices)をGPUメモリ(vertexData)にコピー
 	VertexData* vertexData = nullptr;
+	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
 
-	vertexResource->Map(
-		0,
-		nullptr,
-		reinterpret_cast<void**>(&vertexData)
-	);
+	memcpy(vertexData, sphereVertices.data(), sizeof(VertexData) * kVertexCountSphere);
 
-	memcpy(vertexData, vertices, sizeof(vertices));
+	vertexResource->Unmap(0, nullptr); // コピーが終わったのでアンマップ
 
-	// ========================
-	// VertexBufferView（ストライドの変更）
-	// ========================
-
+	// 3. VertexBufferView（VBV）の設定
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
 	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
-	vertexBufferView.SizeInBytes = sizeof(vertices);
+	vertexBufferView.SizeInBytes = sizeof(VertexData) * kVertexCountSphere;
 	vertexBufferView.StrideInBytes = sizeof(VertexData);
 
 	// ========================
@@ -1321,6 +1359,32 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			//開発用UIの処理、実際に開発用のUIを出す場合はここをゲーム固有の処理に書き換える
 			ImGui::ShowDemoWindow();
 #endif
+
+#ifdef USE_IMGUI
+			ImGui::Begin("Debug Window"); // ウィンドウの開始
+
+			// 3D三角形の操作
+			if (ImGui::TreeNode("3D Sphere")) {
+				ImGui::SliderFloat3("Translation", &transform.translate.x, -10.0f, 10.0f);
+				ImGui::SliderFloat3("Rotation", &transform.rotate.x, -3.14f, 3.14f);
+				ImGui::SliderFloat3("Scale", &transform.scale.x, 0.1f, 5.0f);
+				ImGui::TreePop();
+			}
+
+			ImGui::Separator(); // 区切り線
+
+			// 2Dスプライトの操作
+			if (ImGui::TreeNode("2D Sprite")) {
+				// スプライトはピクセル単位なので、範囲を大きく設定
+				ImGui::SliderFloat3("Position", &transformSprite.translate.x, 0.0f, (float)kClientWidth);
+				ImGui::SliderFloat3("Rotation", &transformSprite.rotate.x, -3.14f, 3.14f);
+				ImGui::SliderFloat2("Scale (Px)", &transformSprite.scale.x, 1.0f, 1000.0f);
+				ImGui::TreePop();
+			}
+
+			ImGui::End(); // ウィンドウの終了
+#endif
+
 			transform.rotate.y += 0.03f;
 
 			Matrix4x4 worldMatrix = Matrix4x4::MakeAffineMatrix(
@@ -1468,7 +1532,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 
 			// 描画
-			commandList->DrawInstanced(6, 1, 0, 0);
+			commandList->DrawInstanced(kVertexCountSphere, 1, 0, 0);
 
 			// VBVを設定
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
