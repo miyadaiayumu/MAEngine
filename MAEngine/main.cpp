@@ -1130,6 +1130,24 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	vertexDataSprite[5].texcoord = { 1.0f, 1.0f };
 	vertexDataSprite[5].normal = { 0.0f, 0.0f, -1.0f };
 
+
+	ID3D12Resource* indexResourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+
+	// データの書き込み
+	uint32_t* indexDataSprite = nullptr;
+	indexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&indexDataSprite));
+	indexDataSprite[0] = 0; indexDataSprite[1] = 1; indexDataSprite[2] = 2;
+	indexDataSprite[3] = 1; indexDataSprite[4] = 3; indexDataSprite[5] = 2;
+	indexResourceSprite->Unmap(0, nullptr);
+
+	// --- IndexBufferViewの作成 ---
+	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
+	indexBufferViewSprite.BufferLocation = indexResourceSprite->GetGPUVirtualAddress();
+	indexBufferViewSprite.SizeInBytes = sizeof(uint32_t) * 6;
+	indexBufferViewSprite.Format = DXGI_FORMAT_R32_UINT;
+
+
+
 	// Sprite用のマテリアルリソースを作る
 	//ID3D12Resource* materialResourceSprite =
 	//	CreateBufferResource(device, (sizeof(Material) + 0xff) & ~0xff);
@@ -1531,7 +1549,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress()); // ライトを再セット
 
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-			commandList->DrawInstanced(6, 1, 0, 0);
+			commandList->IASetIndexBuffer(&indexBufferViewSprite);
+			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
 			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
@@ -1583,6 +1602,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 4. [リソース] バッファ・テクスチャ本体
 	vertexResource->Release();
 	vertexResourceSprite->Release();
+	indexResourceSprite->Release();
 	materialResource->Release();
 	wvpResource->Release();
 	transformationMatrixResourceSprite->Release();
