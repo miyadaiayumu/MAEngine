@@ -1563,7 +1563,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->DrawIndexedInstanced(kIndexCountSphere, 1, 0, 0, 0);
 
 			// 前の描画状態（モンスターボール）を引き継がないよう
-
 			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU); // Textureを再セット
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress()); // ライトを再セット
 
