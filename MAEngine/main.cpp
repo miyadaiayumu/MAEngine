@@ -1060,7 +1060,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// TransformationMatrix用のリソースを作る（サイズを拡張）
 	ID3D12Resource* wvpResource =
 		CreateBufferResource(
-			device,256 // ←構造体サイズに変更
+			device, 256 // ←構造体サイズに変更
 		);
 
 	// データを書き込む（ポインタの型を TransformationMatrix* にする）
@@ -1147,11 +1147,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	indexBufferViewSprite.Format = DXGI_FORMAT_R32_UINT;
 
 
-
 	// Sprite用のマテリアルリソースを作る
-	//ID3D12Resource* materialResourceSprite =
-	//	CreateBufferResource(device, (sizeof(Material) + 0xff) & ~0xff);
-
 	ID3D12Resource* directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
 	DirectionalLight* directionalLightData = nullptr;
 	directionalLightResource->Map(0, nullptr, reinterpret_cast<void**>(&directionalLightData));
@@ -1161,6 +1157,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	directionalLightData->color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	directionalLightData->direction = { 0.0f, -1.0f, 0.0f };
 	directionalLightData->intensity = 1.0f;
+
+
+	// --- 1. インデックスバッファ用のリソース作成 ---
+	const uint32_t kIndexCountSphere = kSubdivision * kSubdivision * 6;
+	ID3D12Resource* indexResourceSphere = CreateBufferResource(device, sizeof(uint32_t) * kIndexCountSphere);
+
+	// --- 2. データの転送 ---
+	uint32_t* indexDataSphere = nullptr;
+	indexResourceSphere->Map(0, nullptr, reinterpret_cast<void**>(&indexDataSphere));
+
+	// indexOffset を活用してインデックスを書き込む
+	uint32_t indexOffset = 0;
+	for (uint32_t i = 0; i < kIndexCountSphere; ++i) {
+		indexDataSphere[i] = i + indexOffset;
+	}
+	indexResourceSphere->Unmap(0, nullptr);
+
+	// --- 3. IndexBufferViewの作成 ---
+	D3D12_INDEX_BUFFER_VIEW indexBufferViewSphere{};
+	indexBufferViewSphere.BufferLocation = indexResourceSphere->GetGPUVirtualAddress();
+	indexBufferViewSphere.SizeInBytes = sizeof(uint32_t) * kIndexCountSphere;
+	indexBufferViewSphere.Format = DXGI_FORMAT_R32_UINT;
 
 	// ========================
 	// Textureデータの読み込みと転送
@@ -1541,7 +1559,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-			commandList->DrawInstanced(kVertexCountSphere, 1, 0, 0);
+			commandList->IASetIndexBuffer(&indexBufferViewSphere); // インデックスバッファをセット
+			commandList->DrawIndexedInstanced(kIndexCountSphere, 1, 0, 0, 0);
 
 			// 前の描画状態（モンスターボール）を引き継がないよう
 
@@ -1602,6 +1621,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 4. [リソース] バッファ・テクスチャ本体
 	vertexResource->Release();
 	vertexResourceSprite->Release();
+	indexResourceSphere->Release();
 	indexResourceSprite->Release();
 	materialResource->Release();
 	wvpResource->Release();
