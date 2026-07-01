@@ -1581,40 +1581,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->SetPipelineState(graphicsPipelineState);
 			commandList->SetGraphicsRootSignature(rootSignature);
 
+			// 1. 球体の描画
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
-
-			// 1. 球体（Sphere）の描画設定
 			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
-
 			commandList->SetGraphicsRootDescriptorTable(2, useMonsterBall ? srvHandleGPU2 : srvHandleGPU);
-
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
-
-			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-			commandList->IASetIndexBuffer(&indexBufferViewSphere); // インデックスバッファをセット
+			commandList->IASetIndexBuffer(&indexBufferViewSphere);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->DrawIndexedInstanced(kIndexCountSphere, 1, 0, 0, 0);
 
-			// 前の描画状態（モンスターボール）を引き継がないよう
-			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU); // Textureを再セット
-			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress()); // ライトを再セット
-
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-			commandList->IASetIndexBuffer(&indexBufferViewSprite);
-			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-
-			// 1. スプライト用マテリアルのデータを更新する（UVTransformを反映）
+			// 2. スプライトの描画（ここを1回だけにする）
+			// マテリアルの更新
 			materialDataSprite->uvTransform = uvTransformMatrix;
 
-			// 2. スプライト用のマテリアルリソースをセット（ここが重要！）
-			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
+			// スプライト用の設定をセット（球体の設定を上書きする）
+			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress()); // マテリアル
+			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress()); // WVP
+			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU); // テクスチャ(uvChecker.png)
 
-			// 3. スプライトのTransformationMatrixをセット
-			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
-
-			// 4. スプライトの描画
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
 			commandList->IASetIndexBuffer(&indexBufferViewSprite);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
@@ -1670,6 +1658,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	indexResourceSphere->Release();
 	indexResourceSprite->Release();
 	materialResource->Release();
+	materialResourceSprite->Release();
 	wvpResource->Release();
 	transformationMatrixResourceSprite->Release();
 	directionalLightResource->Release();
