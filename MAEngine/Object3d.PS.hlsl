@@ -4,6 +4,7 @@ struct Material
 {
     float32_t4 color;
     int32_t enableLighting; // スライドに合わせて追加
+    float32_t4x4 uvTransform; // UV変換用行列を追加
 };
 
 ConstantBuffer<Material> gMaterial : register(b0);
@@ -30,18 +31,19 @@ PixelShaderOutput main(VertexShaderOutput input)
 {
     PixelShaderOutput output;
     
-    // テクスチャのサンプル
-    float32_t4 textureColor = gTexture.Sample(gSampler, input.texcoord);
+    // --- UV変換の追加 ---
+    float4 transformedUV = mul(float32_t4(input.texcoord, 0.0f, 1.0f), gMaterial.uvTransform);
+    
+    // 変換後のxyをテクスチャサンプリングに使用
+    float32_t4 textureColor = gTexture.Sample(gSampler, transformedUV.xy);
     
     // ライティングの計算
     if (gMaterial.enableLighting != 0)
-    { // Lightingする場合
+    {
         // 1. 法線の正規化と内積計算（光の方向は反転させる）
-        // ※ハーフランバートでは負の値も使用するため、ここでは saturate しません
         float32_t NdotL = dot(normalize(input.normal), -gDirectionalLight.direction);
         
         // 2. ハーフランバート反射モデルの適用
-        // [-1.0 〜 1.0] の範囲を [0.0 〜 1.0] に変換して2乗する
         float32_t halfLambert = NdotL * 0.5f + 0.5f;
         halfLambert = halfLambert * halfLambert;
         

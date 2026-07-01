@@ -303,6 +303,8 @@ struct Vector2 {
 struct Material {
 	Vector4 color;
 	int32_t enableLighting;
+	float padding[3]; // アライメント調整用
+	Matrix4x4 uvTransform; // UV変換用行列
 };
 
 struct TransformationMatrix {
@@ -1071,6 +1073,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	wvpData->WVP = MakeIdentity4x4();
 	wvpData->World = MakeIdentity4x4();
 
+	// --- スプライト用を追加！ ---
+	ID3D12Resource* materialResourceSprite = CreateBufferResource(device, (sizeof(Material) + 0xff) & ~0xff);
+	Material* materialDataSprite = nullptr;
+	materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&materialDataSprite));
+	materialDataSprite->color = { 1.0f, 1.0f, 1.0f, 1.0f };
+	materialDataSprite->enableLighting = false; // スプライトはライティング無効に！
+	materialDataSprite->uvTransform = MakeIdentity4x4();
+
 	// ========================
 	// Materialデータを書き込む
 	// ========================
@@ -1091,7 +1101,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	1.0f
 	};
 	materialData->enableLighting = true;
-
+	materialData->uvTransform = MakeIdentity4x4();
 
 	// Sprite用の頂点リソースを作る (6頂点分)
 	ID3D12Resource* vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 6);
@@ -1386,7 +1396,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 #endif
 
 	// Sprite用のTransformationMatrix用のリソースを作る
-	ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(Matrix4x4));
+	ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device,256 );
 
 	// データを書き込む
 	Matrix4x4* transformationMatrixDataSprite = nullptr;
@@ -1395,6 +1405,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// CPUで動かす用のTransformを作る
 	Transform transformSprite{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+
+	// UV変換用のパラメータ
+	Transform uvTransformSprite{
+		{1.0f, 1.0f, 1.0f}, // Scale
+		{0.0f, 0.0f, 0.0f}, // Rotate
+		{0.0f, 0.0f, 0.0f}  // Translate
+	};
 
 	// 2枚目のTextureの読み込みとSRV追加
 	DirectX::ScratchImage mipImages2{};
@@ -1496,6 +1513,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				ImGui::SliderFloat2("Scale (Px)", &transformSprite.scale.x, 1.0f, 1000.0f);
 				ImGui::TreePop();
 			}
+
+			if (ImGui::TreeNode("UV Transform")) {
+				ImGui::SliderFloat2("UVTranslate", &uvTransformSprite.translate.x, -10.0f, 10.0f);
+				ImGui::SliderFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, 10.0f);
+				ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
+				ImGui::TreePop();
+			}
+
 			ImGui::End();
 #endif
 
@@ -1513,6 +1538,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Matrix4x4 viewMatrixSprite = MakeIdentity4x4();
 			Matrix4x4 projectionMatrixSprite = Matrix4x4::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
 			*transformationMatrixDataSprite = Matrix4x4::Multiply(worldMatrixSprite, Matrix4x4::Multiply(viewMatrixSprite, projectionMatrixSprite));
+
+			// --- UVTransformの計算 ---
+			Matrix4x4 uvScaleMat = Matrix4x4::MakeScaleMatrix(uvTransformSprite.scale);
+			Matrix4x4 uvRotMat = Matrix4x4::MakeRotateZMatrix(uvTransformSprite.rotate.z);
+			Matrix4x4 uvTransMat = Matrix4x4::MakeTranslateMatrix(uvTransformSprite.translate);
+
+			// 合成 (Scale -> Rotate -> Translate)
+			Matrix4x4 uvTransformMatrix = Matrix4x4::Multiply(uvScaleMat, Matrix4x4::Multiply(uvRotMat, uvTransMat));
 
 #ifdef USE_IMGUI
 			ImGui::Render();
@@ -1566,6 +1599,20 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU); // Textureを再セット
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress()); // ライトを再セット
 
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+			commandList->IASetIndexBuffer(&indexBufferViewSprite);
+			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+
+			// 1. スプライト用マテリアルのデータを更新する（UVTransformを反映）
+			materialDataSprite->uvTransform = uvTransformMatrix;
+
+			// 2. スプライト用のマテリアルリソースをセット（ここが重要！）
+			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
+
+			// 3. スプライトのTransformationMatrixをセット
+			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+
+			// 4. スプライトの描画
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
 			commandList->IASetIndexBuffer(&indexBufferViewSprite);
 			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
