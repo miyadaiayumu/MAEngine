@@ -14,6 +14,7 @@
 #include<dxgidebug.h>
 #include<dxcapi.h>
 #include <wrl.h>
+#include<xaudio2.h>
 #include"Matrix4x4.h"
 #include"Vector3.h"
 
@@ -30,6 +31,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 #pragma comment(lib, "Dbghelp.lib")
 #pragma comment(lib,"dxguid.lib")
 #pragma comment(lib,"dxcompiler.lib")
+#pragma comment(lib,"xaudio2.lib")
 
 namespace fs = std::filesystem;
 
@@ -141,14 +143,13 @@ IDxcBlob* CompileShader(
 	));
 
 	// hlslファイルを読む
-	IDxcBlobEncoding* shaderSource = nullptr;
-
+	// shaderSource を ComPtr で宣言
+	Microsoft::WRL::ComPtr<IDxcBlobEncoding> shaderSource;
 	HRESULT hr = dxcUtils->LoadFile(
 		filePath.c_str(),
 		nullptr,
-		&shaderSource
+		shaderSource.GetAddressOf() // ComPtr は GetAddressOf() で受ける
 	);
-
 	assert(SUCCEEDED(hr));
 
 	// 読み込んだファイルの内容設定
@@ -168,32 +169,27 @@ IDxcBlob* CompileShader(
 		L"-Zpr",
 	};
 
-	IDxcResult* shaderResult = nullptr;
-
+	// shaderResult も ComPtr で宣言
+	Microsoft::WRL::ComPtr<IDxcResult> shaderResult;
 	hr = dxcCompiler->Compile(
 		&shaderSourceBuffer,
 		arguments,
 		_countof(arguments),
 		includeHandler,
-		IID_PPV_ARGS(&shaderResult)
+		IID_PPV_ARGS(&shaderResult) // .GetAddressOf() と同じ意味
 	);
-
 	assert(SUCCEEDED(hr));
 
 	// Error確認
-	IDxcBlobUtf8* shaderError = nullptr;
-
+	Microsoft::WRL::ComPtr<IDxcBlobUtf8> shaderError;
 	shaderResult->GetOutput(
 		DXC_OUT_ERRORS,
 		IID_PPV_ARGS(&shaderError),
 		nullptr
 	);
 
-	if (shaderError != nullptr &&
-		shaderError->GetStringLength() != 0)
-	{
+	if (shaderError != nullptr && shaderError->GetStringLength() != 0) {
 		logger.Log(shaderError->GetStringPointer());
-
 		assert(false);
 	}
 
@@ -209,10 +205,6 @@ IDxcBlob* CompileShader(
 	assert(SUCCEEDED(hr));
 
 	logger.Log("Compile Succeeded");
-
-	// 解放
-	shaderSource->Release();
-	shaderResult->Release();
 
 	return shaderBlob;
 }
@@ -332,6 +324,62 @@ struct ModelData {
 	MaterialData material;
 };
 
+// 音声データ読み込み用構造体
+struct ChunkHeader {
+	char id[4];
+	int32_t size;
+};
+
+struct RiffHeader {
+	ChunkHeader chunk;
+	char type[4];
+};
+
+struct FormatChunk {
+	ChunkHeader chunk;
+	WAVEFORMATEX fmt;
+};
+
+struct SoundData {
+	WAVEFORMATEX wfex;
+	BYTE* pBuffer;
+	unsigned int bufferSize;
+};
+
+void SoundUnload(SoundData* soundData)
+{
+	// 確保したバッファのメモリを解放
+	delete[] soundData->pBuffer;
+
+	// ポインタを無効化し、サイズを0に戻して安全にする
+	soundData->pBuffer = nullptr;
+	soundData->bufferSize = 0;
+	soundData->wfex = {};
+}
+
+// 音声再生
+void SoundPlayWave(IXAudio2* xAudio2, const SoundData& soundData) {
+	HRESULT result;
+
+	// 波形フォーマットを元にSourceVoiceの生成
+	IXAudio2SourceVoice* pSourceVoice = nullptr;
+	result = xAudio2->CreateSourceVoice(&pSourceVoice, &soundData.wfex);
+	assert(SUCCEEDED(result));
+
+	// 再生する波形データの設定
+	XAUDIO2_BUFFER buf{};
+	buf.pAudioData = soundData.pBuffer;
+	buf.AudioBytes = soundData.bufferSize;
+	buf.Flags = XAUDIO2_END_OF_STREAM;
+
+	// 波形データの再生
+	result = pSourceVoice->SubmitSourceBuffer(&buf);
+	assert(SUCCEEDED(result));
+
+	result = pSourceVoice->Start();
+	assert(SUCCEEDED(result));
+}
+
 MaterialData LoadMaterialTemplateFile(const std::string& directoryPath, const std::string& filename) {
 	MaterialData materialData; // 構築するデータ
 	std::string line;
@@ -354,7 +402,6 @@ MaterialData LoadMaterialTemplateFile(const std::string& directoryPath, const st
 	return materialData;
 }
 
-// スライドの処理を関数化したもの
 ModelData LoadObjFile(const std::string& directoryPath, const std::string& filename) {
 	ModelData modelData;
 	std::vector<Vector4> positions;
@@ -380,7 +427,7 @@ ModelData LoadObjFile(const std::string& directoryPath, const std::string& filen
 		} else if (identifier == "vt") {
 			Vector2 texcoord;
 			lineStream >> texcoord.u >> texcoord.v;
-			// ★V成分を反転させる (1.0 - v)
+			// V成分を反転させる (1.0 - v)
 			texcoord.v = 1.0f - texcoord.v;
 			texcoords.push_back(texcoord);
 		} else if (identifier == "vn") {
@@ -423,6 +470,56 @@ ModelData LoadObjFile(const std::string& directoryPath, const std::string& filen
 		}
 	}
 	return modelData;
+}
+
+SoundData SoundLoadWave(const char* filename) {
+	// ファイルのオープン
+	std::ifstream file;
+	file.open(filename, std::ios_base::binary);
+	assert(file.is_open());
+
+	// RIFFヘッダーの読み込みとチェック
+	RiffHeader riff;
+	file.read((char*)&riff, sizeof(riff));
+	assert(strncmp(riff.chunk.id, "RIFF", 4) == 0);
+	assert(strncmp(riff.type, "WAVE", 4) == 0);
+
+	// Formatチャンクの読み込み
+	FormatChunk format = {};
+	file.read((char*)&format, sizeof(ChunkHeader)); // 先にヘッダーのみ読み込む
+	if (strncmp(format.chunk.id, "fmt ", 4) != 0) {
+		assert(0);
+	}
+	assert(format.chunk.size <= sizeof(format.fmt));
+	file.read((char*)&format.fmt, format.chunk.size); // 本体を読み込む
+
+	// Dataチャンクの読み込み（JUNKチャンクのスキップ対応）
+	ChunkHeader data;
+	file.read((char*)&data, sizeof(data));
+
+	// JUNKチャンクがあれば読み飛ばす
+	if (strncmp(data.id, "JUNK", 4) == 0) {
+		file.seekg(data.size, std::ios_base::cur);
+		file.read((char*)&data, sizeof(data)); // 本来のdataチャンクを読み直す
+	}
+
+	// データチャンクの確認
+	assert(strncmp(data.id, "data", 4) == 0);
+
+	// 波形データの読み込み
+	char* pBuffer = new char[data.size];
+	file.read(pBuffer, data.size);
+
+	// ファイルを閉じる
+	file.close();
+
+	// 読み込んだデータを構造体に格納して返す
+	SoundData soundData = {};
+	soundData.wfex = format.fmt;
+	soundData.pBuffer = reinterpret_cast<BYTE*>(pBuffer);
+	soundData.bufferSize = data.size;
+
+	return soundData;
 }
 
 DirectX::ScratchImage LoadTexture(const std::string& filePath) {
@@ -501,7 +598,7 @@ ID3D12Resource* CreateDepthStencilTextureResource(
 	int32_t width,
 	int32_t height)
 {
-	// 1. 生成するResourceの設定
+	// 生成するResourceの設定
 	D3D12_RESOURCE_DESC resourceDesc{};
 	resourceDesc.Width = static_cast<UINT64>(width);       // Textureの幅
 	resourceDesc.Height = static_cast<UINT>(height);       // Textureの高さ
@@ -512,17 +609,17 @@ ID3D12Resource* CreateDepthStencilTextureResource(
 	resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; // 2次元
 	resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL; // DepthStencilとして使う通知
 
-	// 2. 利用するHeapの設定
+	// 利用するHeapの設定
 	D3D12_HEAP_PROPERTIES heapProperties{};
 	heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;         // VRAM上に作る
 
-	// 3. 深度値のクリア設定（最適化のために事前に値を指定しておく）
+	// 深度値のクリア設定
 	D3D12_CLEAR_VALUE depthClearValue{};
 	depthClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	depthClearValue.DepthStencil.Depth = 1.0f;
 	depthClearValue.DepthStencil.Stencil = 0;
 
-	// 4. Resourceの生成
+	// Resourceの生成
 	ID3D12Resource* resource = nullptr;
 	HRESULT hr = d3dDevice->CreateCommittedResource(
 		&heapProperties,
@@ -600,7 +697,7 @@ struct D3DResourceLeakChecker {
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	CoInitializeEx(0, COINIT_MULTITHREADED);
 
-	// 1. まずリークチェッカーを宣言する（これが一番最後に解放される）
+	// まずリークチェッカーを宣言する
 	D3DResourceLeakChecker leakCheck;
 
 	Microsoft::WRL::ComPtr<ID3D12Device> device;
@@ -730,7 +827,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	for (size_t i = 0; i < _countof(featureLevels); ++i) {
 		hr = D3D12CreateDevice(
-			useAdapter.Get(), 
+			useAdapter.Get(),
 			featureLevels[i],
 			IID_PPV_ARGS(&device)
 		);
@@ -751,12 +848,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	logger.Log("Complete create D3D12Device!!");
 
-	// ★スライド1: ComPtrの宣言に差し替え
-	// ※自作関数が生ポインタを返す場合は、.Attach() を使ってComPtrに管理を渡します。
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
 	srvDescriptorHeap.Attach(
 		CreateDescriptorHeap(
-			device.Get(), // ★スライド2: 関数に渡すときは .Get()
+			device.Get(),
 			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
 			128,
 			true
@@ -764,7 +859,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	);
 
 #ifdef _DEBUG
-	// ★スライド1: ComPtrの宣言に差し替え
+
 	Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
 	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
 		//やばいエラー時に止まる
@@ -790,7 +885,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		//指定したメッセージの表示を抑制する
 		infoQueue->PushStorageFilter(&filter);
 
-		// ★スライド4: infoQueue->Release(); は削除しました
 	}
 #endif // _DEBUG
 
@@ -805,6 +899,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	assert(SUCCEEDED(hr));
 
+	// XAudio2の初期化
+	Microsoft::WRL::ComPtr<IXAudio2> xAudio2;
+	IXAudio2MasteringVoice* masterVoice = nullptr;
+
+	hr = XAudio2Create(&xAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
+	assert(SUCCEEDED(hr));
+
+	hr = xAudio2->CreateMasteringVoice(&masterVoice);
+	assert(SUCCEEDED(hr));
+
 	// コマンドアロケータを生成する
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
 
@@ -817,7 +921,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// コマンドリストを生成する
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
-	// ★スライド2: commandAllocatorに .Get() を適用
+
 	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
 	assert(SUCCEEDED(hr));
 
@@ -854,7 +958,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// DXC初期化
 	// ========================
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<IDxcUtils> dxcUtils;
 	hr = DxcCreateInstance(
 		CLSID_DxcUtils,
@@ -862,7 +965,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	);
 	assert(SUCCEEDED(hr));
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<IDxcCompiler3> dxcCompiler;
 	hr = DxcCreateInstance(
 		CLSID_DxcCompiler,
@@ -870,7 +972,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	);
 	assert(SUCCEEDED(hr));
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<IDxcIncludeHandler> includeHandler;
 	hr = dxcUtils->CreateDefaultIncludeHandler(
 		&includeHandler
@@ -923,7 +1024,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	descriptionRootSignature.pStaticSamplers = staticSamplers;
 	descriptionRootSignature.NumStaticSamplers = _countof(staticSamplers);
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob;
 	Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
 
@@ -939,7 +1039,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		assert(false);
 	}
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
 
 	hr = device->CreateRootSignature(
@@ -990,7 +1089,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	// Shader Compile
 	// ========================
-	// ★スライド1 & スライド2: ComPtrにして引数に .Get() を適用
 	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob;
 	vertexShaderBlob.Attach(CompileShader(
 		L"Object3d.VS.hlsl",
@@ -1013,7 +1111,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// PSO
 	// ========================
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsPipelineStateDesc{};
-	graphicsPipelineStateDesc.pRootSignature = rootSignature.Get(); // ★スライド2: .Get()
+	graphicsPipelineStateDesc.pRootSignature = rootSignature.Get();
 	graphicsPipelineStateDesc.InputLayout = inputLayoutDesc;
 	graphicsPipelineStateDesc.VS.pShaderBytecode = vertexShaderBlob->GetBufferPointer();
 	graphicsPipelineStateDesc.VS.BytecodeLength = vertexShaderBlob->GetBufferSize();
@@ -1032,7 +1130,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	graphicsPipelineStateDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 	graphicsPipelineStateDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> graphicsPipelineState;
 	hr = device->CreateGraphicsPipelineState(
 		&graphicsPipelineStateDesc,
@@ -1049,7 +1146,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	ModelData modelData = LoadObjFile("resources", "plane.obj");
 	DirectX::ScratchImage mipImages2 = LoadTexture(modelData.material.textureFilePath);
 
-	// ★スライド1 & スライド2 & Attach: リソース類のComPtr化
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource;
 	vertexResource.Attach(CreateBufferResource(device.Get(), sizeof(VertexData) * modelData.vertices.size()));
 
@@ -1221,7 +1317,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	D3D12_CPU_DESCRIPTOR_HANDLE samplerHandleCPU = samplerDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	device->CreateSampler(&samplerDesc, samplerHandleCPU);
 
-	// ★スライド1: ComPtrの宣言に差し替え
 	Microsoft::WRL::ComPtr<IDXGISwapChain4> swapChain;
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
 	swapChainDesc.Width = kClientWidth;
@@ -1238,7 +1333,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		&swapChainDesc,
 		nullptr,
 		nullptr,
-		reinterpret_cast<IDXGISwapChain1**>(swapChain.GetAddressOf()) // ★スライド3: GetAddressOf()
+		reinterpret_cast<IDXGISwapChain1**>(swapChain.GetAddressOf())
 	);
 	assert(SUCCEEDED(hr));
 
@@ -1263,7 +1358,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	device->CreateDepthStencilView(depthStencilResource.Get(), &dsvDesc, dsvHandle);
 
-	// ★スライド1: 配列要素もComPtrに変更可能です
 	Microsoft::WRL::ComPtr<ID3D12Resource> swapChainResources[2];
 	hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainResources[0]));
 	assert(SUCCEEDED(hr));
@@ -1288,10 +1382,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	ImGui_ImplWin32_Init(hwnd);
 	ImGui_ImplDX12_Init(
-		device.Get(), // ★スライド2: .Get()
+		device.Get(),
 		swapChainDesc.BufferCount,
 		rtvDesc.Format,
-		srvDescriptorHeap.Get(), // ★スライド2: .Get()
+		srvDescriptorHeap.Get(),
 		srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
 		srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart()
 	);
@@ -1346,6 +1440,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	device->CreateShaderResourceView(textureResourceSprite.Get(), &srvDesc, srvHandleCPUSprite);
 
 	ShowWindow(hwnd, SW_SHOW);
+
+	// ========================
+// 音声読み込み
+// ========================
+	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
+	SoundPlayWave(xAudio2.Get(), soundData1);
 
 	MSG msg{};
 	while (msg.message != WM_QUIT) {
@@ -1414,7 +1514,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			D3D12_RESOURCE_BARRIER barrier{};
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = swapChainResources[backBufferIndex].Get(); // ★スライト2: .Get()
+			barrier.Transition.pResource = swapChainResources[backBufferIndex].Get();
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -1434,13 +1534,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
 			commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-			ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() }; // ★スライド2: .Get()
+			ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() };
 			commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-			commandList->SetPipelineState(graphicsPipelineState.Get()); // ★スライド2: .Get()
-			commandList->SetGraphicsRootSignature(rootSignature.Get()); // ★スライド2: .Get()
+			commandList->SetPipelineState(graphicsPipelineState.Get());
+			commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-			// --- 1. OBJモデルの描画 ---
+			// --- OBJモデルの描画 ---
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);
@@ -1450,7 +1550,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
 
-			// --- 2. スプライトの描画 ---
+			// --- スプライトの描画 ---
 			materialDataSprite->uvTransform = uvTransformMatrix;
 
 			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
@@ -1463,7 +1563,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
-			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get()); // ★スライド2: .Get()
+			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
 #endif
 
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -1473,13 +1573,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			hr = commandList->Close();
 			assert(SUCCEEDED(hr));
 
-			ID3D12CommandList* commandLists[] = { commandList.Get() }; // ★スライド2: .Get()
+			ID3D12CommandList* commandLists[] = { commandList.Get() };
 			commandQueue->ExecuteCommandLists(1, commandLists);
 
 			swapChain->Present(1, 0);
 
 			fenceValue++;
-			hr = commandQueue->Signal(fence.Get(), fenceValue); // ★スライド2: .Get()
+			hr = commandQueue->Signal(fence.Get(), fenceValue);
 			assert(SUCCEEDED(hr));
 
 			if (fence->GetCompletedValue() < fenceValue) {
@@ -1489,28 +1589,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 
 			commandAllocator->Reset();
-			commandList->Reset(commandAllocator.Get(), nullptr); // ★スライド2: .Get()
+			commandList->Reset(commandAllocator.Get(), nullptr);
 		}
 	}
 
 	// ========================
 	// 解放処理
 	// ========================
+
+	// 1. 先にXAudio2を解放して再生スレッドを安全に停止
+	xAudio2.Reset();
+
+	// 2. その後に音声データのメモリを安全に解放
+	SoundUnload(&soundData1);
+
 #ifdef USE_IMGUI
 	ImGui_ImplDX12_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 #endif
 
-	// ★ 1. COMオブジェクトの Release() はすべて削除！
-	// ComPtr が自動的にやってくれます。
-
-	// ★ 2. OSのハンドルなどは手動で閉じる
+	// OSのハンドルなどは手動で閉じる
 	if (fenceEvent) {
 		CloseHandle(fenceEvent);
 	}
-
-	
 
 	return 0;
 }
