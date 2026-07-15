@@ -1,4 +1,6 @@
 #include <Windows.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
 #include <cstdint>
 #include <string>
 #include <format>
@@ -32,6 +34,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 #pragma comment(lib,"dxguid.lib")
 #pragma comment(lib,"dxcompiler.lib")
 #pragma comment(lib,"xaudio2.lib")
+#pragma comment(lib, "dinput8.lib")
 
 namespace fs = std::filesystem;
 
@@ -692,6 +695,26 @@ struct D3DResourceLeakChecker {
 		}
 	}
 };
+
+// 1. キーを押している状態か
+bool IsPressKey(BYTE* key, uint8_t keyNumber) {
+	return (key[keyNumber] & 0x80) != 0;
+}
+
+// 2. キーを離している状態か
+bool IsReleaseKey(BYTE* key, uint8_t keyNumber) {
+	return (key[keyNumber] & 0x80) == 0;
+}
+
+// 3. キーを押した瞬間か
+bool IsTriggerKey(BYTE* key, BYTE* keyPre, uint8_t keyNumber) {
+	return ((key[keyNumber] & 0x80) != 0) && ((keyPre[keyNumber] & 0x80) == 0);
+}
+
+// 4. キーを離した瞬間か
+bool IsReleaseTriggerKey(BYTE* key, BYTE* keyPre, uint8_t keyNumber) {
+	return ((key[keyNumber] & 0x80) == 0) && ((keyPre[keyNumber] & 0x80) != 0);
+}
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -1441,11 +1464,41 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	ShowWindow(hwnd, SW_SHOW);
 
+	// 1. DirectInputオブジェクトの生成
+	Microsoft::WRL::ComPtr<IDirectInput8> directInput;
+	hr = DirectInput8Create(
+		wc.hInstance,
+		DIRECTINPUT_VERSION,
+		IID_IDirectInput8,
+		reinterpret_cast<void**>(directInput.GetAddressOf()),
+		nullptr
+	);
+	assert(SUCCEEDED(hr));
+
+	// 2. キーボードデバイスの生成
+	Microsoft::WRL::ComPtr<IDirectInputDevice8> keyboard;
+	hr = directInput->CreateDevice(GUID_SysKeyboard, keyboard.GetAddressOf(), nullptr);
+	assert(SUCCEEDED(hr));
+
+	// 3. 入力データ形式のセット
+	hr = keyboard->SetDataFormat(&c_dfDIKeyboard);
+	assert(SUCCEEDED(hr));
+
+	// 4. 排他制御レベルのセット
+	hr = keyboard->SetCooperativeLevel(
+		hwnd,
+		DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY
+	);
+	assert(SUCCEEDED(hr));
+
 	// ========================
-// 音声読み込み
-// ========================
+	// 音声読み込み
+	// ========================
 	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
 	SoundPlayWave(xAudio2.Get(), soundData1);
+
+	BYTE key[256] = {};
+	BYTE keyPre[256] = {};
 
 	MSG msg{};
 	while (msg.message != WM_QUIT) {
@@ -1453,6 +1506,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		} else {
+
+			// --------------------------------------------------
+			// DirectInput 毎フレーム更新処理
+			// --------------------------------------------------
+			// 前フレームのキー状態を保存
+			std::memcpy(keyPre, key, sizeof(key));
+
+			// キーボード情報の取得開始
+			keyboard->Acquire();
+
+			// 全キーの入力状態を取得する
+			keyboard->GetDeviceState(sizeof(key), key);
+
+			if (key[DIK_0]) {
+				OutputDebugStringA("Hit 0\n");
+			}
+
 #ifdef USE_IMGUI
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
