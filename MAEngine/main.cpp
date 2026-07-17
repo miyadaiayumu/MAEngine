@@ -1506,18 +1506,30 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		} else {
-
 			// --------------------------------------------------
-			// DirectInput 毎フレーム更新処理
+			// DirectInput 毎フレーム更新処理 
 			// --------------------------------------------------
 			// 前フレームのキー状態を保存
 			std::memcpy(keyPre, key, sizeof(key));
 
-			// キーボード情報の取得開始
-			keyboard->Acquire();
+			// 1. キーボード情報の取得開始 (戻り値を受け取る)
+			HRESULT hrAcquire = keyboard->Acquire();
 
-			// 全キーの入力状態を取得する
-			keyboard->GetDeviceState(sizeof(key), key);
+			// 2. 全キーの入力状態を取得する (戻り値を受け取る)
+			HRESULT hrState = keyboard->GetDeviceState(sizeof(key), key);
+
+			// デバイスがロストしている、または取得できていない場合
+			if (hrState == DIERR_INPUTLOST || hrState == DIERR_NOTACQUIRED) {
+				// 再取得を試みる
+				hrAcquire = keyboard->Acquire();
+				if (SUCCEEDED(hrAcquire)) {
+					// 再取得に成功したら、もう一度データを読み直す
+					keyboard->GetDeviceState(sizeof(key), key);
+				} else {
+					// 完全にロストしている場合は入力をクリアして安全を保つ
+					std::memset(key, 0, sizeof(key));
+				}
+			}
 
 			if (key[DIK_0]) {
 				OutputDebugStringA("Hit 0\n");
