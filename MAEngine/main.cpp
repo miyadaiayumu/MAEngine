@@ -1161,6 +1161,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	D3D12_BLEND_DESC blendDesc{};
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	blendDesc.RenderTarget[0].BlendEnable = TRUE;
+	blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+	blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+	blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
 
 	// ========================
 	// RasterizerState
@@ -1284,7 +1291,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	intermediateResource.Attach(UploadTextureData(textureResource.Get(), mipImages2, device.Get(), commandList.Get()));
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource;
-	vertexResource.Attach(CreateBufferResource(device.Get(), sizeof(VertexData)* modelData.vertices.size()));
+	vertexResource.Attach(CreateBufferResource(device.Get(), sizeof(VertexData) * modelData.vertices.size()));
 
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
 	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
@@ -1293,7 +1300,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	VertexData* vertexData = nullptr;
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
-	std::memcpy(vertexData, modelData.vertices.data(), sizeof(VertexData)* modelData.vertices.size());
+	std::memcpy(vertexData, modelData.vertices.data(), sizeof(VertexData) * modelData.vertices.size());
 	vertexResource->Unmap(0, nullptr);
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResource;
@@ -1378,7 +1385,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// --- 球用の頂点リソースを作成 ---
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSphere;
-	vertexResourceSphere.Attach(CreateBufferResource(device.Get(), sizeof(VertexData)* sphereVertices.size()));
+	vertexResourceSphere.Attach(CreateBufferResource(device.Get(), sizeof(VertexData) * sphereVertices.size()));
 
 	// --- 球用の頂点バッファビュー(VBV)を定義 ---
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSphere{};
@@ -1389,12 +1396,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// --- 球の頂点データをリソースに書き込む ---
 	VertexData* vertexDataSphere = nullptr;
 	vertexResourceSphere->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSphere));
-	std::memcpy(vertexDataSphere, sphereVertices.data(), sizeof(VertexData)* sphereVertices.size());
+	std::memcpy(vertexDataSphere, sphereVertices.data(), sizeof(VertexData) * sphereVertices.size());
 	vertexResourceSphere->Unmap(0, nullptr);
 
 	const uint32_t kIndexCountSphere = kSubdivision * kSubdivision * 6;
 	Microsoft::WRL::ComPtr<ID3D12Resource> indexResourceSphere;
-	indexResourceSphere.Attach(CreateBufferResource(device.Get(), sizeof(uint32_t)* kIndexCountSphere));
+	indexResourceSphere.Attach(CreateBufferResource(device.Get(), sizeof(uint32_t) * kIndexCountSphere));
 
 	uint32_t* indexDataSphere = nullptr;
 	indexResourceSphere->Map(0, nullptr, reinterpret_cast<void**>(&indexDataSphere));
@@ -1409,7 +1416,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	indexBufferViewSphere.SizeInBytes = sizeof(uint32_t) * kIndexCountSphere;
 	indexBufferViewSphere.Format = DXGI_FORMAT_R32_UINT;
 
-	// ★★★ 【修正箇所】古いテクスチャ生成処理を削除し、mipImages2のメタデータでSRVを作成 ★★★
+	// 古いテクスチャ生成処理を削除し、mipImages2のメタデータでSRVを作成
 	const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
