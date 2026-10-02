@@ -3,8 +3,10 @@
 struct Material
 {
     float32_t4 color;
-    int32_t enableLighting; // スライドに合わせて追加
-    float32_t4x4 uvTransform; // UV変換用行列を追加
+    int32_t enableLighting; // 互換性のために残すか、なくてもOKですが今回は構造を合わせるためそのままにします
+    int32_t lightingType; // 0: 無し, 1: ランバート, 2: ハーフランバート
+    float padding;
+    float32_t4x4 uvTransform;
 };
 
 ConstantBuffer<Material> gMaterial : register(b0);
@@ -38,23 +40,34 @@ PixelShaderOutput main(VertexShaderOutput input)
     float32_t4 textureColor = gTexture.Sample(gSampler, transformedUV.xy);
     
     // ライティングの計算
-    if (gMaterial.enableLighting != 0)
+    // lightingType が 0 以外、または従来の enableLighting != 0 の場合にライティングを行う
+    if (gMaterial.lightingType != 0)
     {
         // 1. 法線の正規化と内積計算（光の方向は反転させる）
         float32_t NdotL = dot(normalize(input.normal), -gDirectionalLight.direction);
         
-        // 2. ハーフランバート反射モデルの適用
-        float32_t halfLambert = NdotL * 0.5f + 0.5f;
-        halfLambert = halfLambert * halfLambert;
+        float diffuseFactor = 0.0f;
         
-        // 3. 色の計算（RGBのみにライティングを適用し、アルファ値が影で透けるのを防ぐ）
-        float32_t3 diffuse = gMaterial.color.rgb * textureColor.rgb * gDirectionalLight.color.rgb * halfLambert * gDirectionalLight.intensity;
+        // 2. 反射モデルの切り替え
+        if (gMaterial.lightingType == 1)
+        {
+            // ランバート反射
+            diffuseFactor = saturate(NdotL);
+        }
+        else if (gMaterial.lightingType == 2)
+        {
+            // ハーフランバート反射
+            float32_t halfLambert = NdotL * 0.5f + 0.5f;
+            diffuseFactor = halfLambert * halfLambert;
+        }
         
-        // 最終的な色とアルファを結合
+        // 3. 色の計算
+        float32_t3 diffuse = gMaterial.color.rgb * textureColor.rgb * gDirectionalLight.color.rgb * diffuseFactor * gDirectionalLight.intensity;
+        
         output.color = float32_t4(diffuse, gMaterial.color.a * textureColor.a);
     }
     else
-    { // Lightingしない場合
+    { // lightingType == 0 (ライティングしない場合)
         output.color = gMaterial.color * textureColor;
     }
     

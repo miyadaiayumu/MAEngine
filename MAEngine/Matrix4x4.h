@@ -1,6 +1,6 @@
 #pragma once
 
-struct Vector3; // 追加
+struct Vector3;
 
 struct Matrix4x4 {
 	float m[4][4];
