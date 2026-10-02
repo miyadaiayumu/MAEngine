@@ -39,6 +39,12 @@ PixelShaderOutput main(VertexShaderOutput input)
     // 変換後のxyをテクスチャサンプリングに使用
     float32_t4 textureColor = gTexture.Sample(gSampler, transformedUV.xy);
     
+    // アルファ値が一定以下（透明領域）のピクセルを破棄する
+    if (textureColor.a < 0.5f)
+    {
+        discard;
+    }
+    
     // ライティングの計算
     // lightingType が 0 以外、または従来の enableLighting != 0 の場合にライティングを行う
     if (gMaterial.lightingType != 0)

@@ -284,10 +284,10 @@ LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception)
 }
 
 // 描画切り替えフラグ
-bool enablePlaneDraw = true;
-bool enableModelDraw = true;
-bool enableSphereDraw = true;
-bool enableSpriteDraw = true;
+bool enablePlaneDraw = true;   // 平面
+bool enableModelDraw = true;  // モデル
+bool enableSphereDraw = false; // 球体
+bool enableSpriteDraw = false; // スプライト
 
 struct Vector4 {
 	float x;
@@ -1198,6 +1198,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	D3D12_BLEND_DESC blendDesc{};
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	blendDesc.RenderTarget[0].BlendEnable = TRUE;
+	blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+	blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+	blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+	blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
 
 	// ========================
 	// RasterizerState
@@ -1254,6 +1261,32 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	hr = device->CreateGraphicsPipelineState(
 		&graphicsPipelineStateDesc,
 		IID_PPV_ARGS(&graphicsPipelineState)
+	);
+	assert(SUCCEEDED(hr));
+
+
+	// =========================================================
+	// 通常アルファブレンディング（非加算合成）用 PSO の作成
+	// =========================================================
+	D3D12_BLEND_DESC blendDescAlpha{};
+	blendDescAlpha.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	blendDescAlpha.RenderTarget[0].BlendEnable = TRUE;
+	blendDescAlpha.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	blendDescAlpha.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA; // 通常アルファ合成
+	blendDescAlpha.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+	blendDescAlpha.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+	blendDescAlpha.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+	blendDescAlpha.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsPipelineStateDescFence = graphicsPipelineStateDesc;
+	graphicsPipelineStateDescFence.BlendState = blendDescAlpha;
+
+	graphicsPipelineStateDescFence.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> graphicsPipelineStateFence;
+	hr = device->CreateGraphicsPipelineState(
+		&graphicsPipelineStateDescFence,
+		IID_PPV_ARGS(&graphicsPipelineStateFence)
 	);
 	assert(SUCCEEDED(hr));
 
@@ -1409,7 +1442,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// モデルの読み込みとメッシュごとの頂点バッファ生成
 	// ※ フォルダ名・ファイル名はお手元の環境に合わせて変更してください
-	ModelData modelData = LoadObjFile("resources", "axis.obj");
+	ModelData modelData = LoadObjFile("resources", "fence.obj");
 	ModelResource modelResource;
 
 	for (const auto& meshData : modelData.meshes) {
@@ -1665,6 +1698,27 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	device->CreateShaderResourceView(textureResourceSprite.Get(), &srvDescSprite, srvHandleCPUSprite);
 
+	// フェンス用テクスチャの読み込みとSRV作成
+	DirectX::ScratchImage mipImagesFence = LoadTexture("resources/fence.png"); 
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> textureResourceFence;
+	textureResourceFence.Attach(CreateTextureResource(device.Get(), mipImagesFence.GetMetadata()));
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> intermediateResourceFence;
+	intermediateResourceFence.Attach(UploadTextureData(textureResourceFence.Get(), mipImagesFence, device.Get(), commandList.Get()));
+
+	// ディスクリプタヒープの 3 番にフェンス用 SRV を作成
+	D3D12_CPU_DESCRIPTOR_HANDLE srvHandleCPUFence = GetCPUDescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 3);
+	D3D12_GPU_DESCRIPTOR_HANDLE srvHandleGPUFence = GetGPUDescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 3);
+
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDescFence{};
+	srvDescFence.Format = mipImagesFence.GetMetadata().format;
+	srvDescFence.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDescFence.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDescFence.Texture2D.MipLevels = static_cast<UINT>(mipImagesFence.GetMetadata().mipLevels);
+
+	device->CreateShaderResourceView(textureResourceFence.Get(), &srvDescFence, srvHandleCPUFence);
+
 	ShowWindow(hwnd, SW_SHOW);
 
 	// 1. DirectInputオブジェクトの生成
@@ -1744,6 +1798,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 			ImGui::Begin("Settings");
 
+			// 開いておくノード（DefaultOpen）
 			if (ImGui::TreeNodeEx("Rendering Switch", ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGui::Checkbox("Draw Plane", &enablePlaneDraw);
 				ImGui::Checkbox("Draw Model", &enableModelDraw);
@@ -1752,24 +1807,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				ImGui::TreePop();
 			}
 
-			// 1. 平面 (Plane) の操作
+			// 1. 平面 (Plane) - 開いておく
 			if (ImGui::TreeNodeEx("Object (Plane)", ImGuiTreeNodeFlags_DefaultOpen)) {
+				ImGui::ColorEdit4("Material Color", &materialData->color.x);
 				ImGui::SliderFloat3("Translate", &transform.translate.x, -10.0f, 10.0f);
 				ImGui::SliderFloat3("Rotate", &transform.rotate.x, -3.14f, 3.14f);
 				ImGui::SliderFloat3("Scale", &transform.scale.x, 0.1f, 10.0f);
 				ImGui::TreePop();
 			}
 
-			// 2. 球体 (Sphere) の操作
-			if (ImGui::TreeNodeEx("Object (Sphere)", ImGuiTreeNodeFlags_DefaultOpen)) {
+			// 2. 球体 (Sphere) - 初期状態は閉じる (0 を指定)
+			if (ImGui::TreeNodeEx("Object (Sphere)", 0)) {
+				ImGui::ColorEdit4("Color##Sphere", &materialDataSphere->color.x);
 				ImGui::SliderFloat3("Translate##Sphere", &sphereTransform.translate.x, -10.0f, 10.0f);
 				ImGui::SliderFloat3("Rotate##Sphere", &sphereTransform.rotate.x, -3.14f, 3.14f);
 				ImGui::SliderFloat3("Scale##Sphere", &sphereTransform.scale.x, 0.1f, 10.0f);
 				ImGui::TreePop();
 			}
 
-			// 3. スプライト (Sprite) の操作
-			if (ImGui::TreeNodeEx("Object (Sprite)", ImGuiTreeNodeFlags_DefaultOpen)) {
+			// 3. スプライト (Sprite) - 初期状態は閉じる (0 を指定)
+			if (ImGui::TreeNodeEx("Object (Sprite)", 0)) {
 				ImGui::SliderFloat3("Translate##Sprite", &transformSprite.translate.x, -500.0f, 1280.0f);
 				ImGui::SliderFloat3("Rotate##Sprite", &transformSprite.rotate.x, -3.14f, 3.14f);
 				ImGui::SliderFloat3("Scale##Sprite", &transformSprite.scale.x, 1.0f, 1000.0f);
@@ -1783,26 +1840,25 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				ImGui::TreePop();
 			}
 
-			if (ImGui::TreeNodeEx("Object (Model)", ImGuiTreeNodeFlags_DefaultOpen)) {
+			// モデル (Model) - 初期状態は閉じる (0 を指定)
+			if (ImGui::TreeNodeEx("Object (Model)", 0)) {
+				ImGui::ColorEdit4("Color##Model", &modelMaterialData->color.x);
 				ImGui::SliderFloat3("Translate##Model", &modelTransform.translate.x, -10.0f, 10.0f);
 				ImGui::SliderFloat3("Rotate##Model", &modelTransform.rotate.x, -3.14f, 3.14f);
 				ImGui::SliderFloat3("Scale##Model", &modelTransform.scale.x, 0.1f, 10.0f);
 				ImGui::TreePop();
 			}
 
-			// 4. ライトの操作 (ライティング方法の切り替えもここで一括管理)
+			// 4. ライト (Light) - 開いておく (DefaultOpen)
 			if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGui::ColorEdit4("LightColor", &directionalLightData->color.x);
 				ImGui::SliderFloat3("LightDirection", &directionalLightData->direction.x, -1.0f, 1.0f);
 				ImGui::SliderFloat("Intensity", &directionalLightData->intensity, 0.0f, 10.0f);
 
-				// 平面と球体で共通の lightingType を保持する変数
-				// 初回起動時などのために平面側の値を基準に一時変数として持たせる
 				static int currentLightingType = 1;
 
 				const char* lightingItems[] = { "None", "Lambert", "Half Lambert" };
 				if (ImGui::Combo("Lighting Type", &currentLightingType, lightingItems, IM_ARRAYSIZE(lightingItems))) {
-					// 選択された値を、平面と球体のマテリアル両方に一括で反映する
 					materialData->lightingType = currentLightingType;
 					materialDataSphere->lightingType = currentLightingType;
 					modelMaterialData->lightingType = currentLightingType;
@@ -1811,9 +1867,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				ImGui::TreePop();
 			}
 
-			// 5. サウンドコントロール（ここを追加）
-			if (ImGui::TreeNodeEx("Sound Control", ImGuiTreeNodeFlags_DefaultOpen)) {
-				// ボタンが押されたら Wave を再生
+			// 5. サウンドコントロール - 初期状態は閉じる (0 を指定)
+			if (ImGui::TreeNodeEx("Sound Control", 0)) {
 				if (ImGui::Button("Play Fanfare")) {
 					SoundPlayWave(xAudio2.Get(), soundData1);
 				}
@@ -1913,11 +1968,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 				commandList->DrawIndexedInstanced(kIndexCountSphere, 1, 0, 0, 0);
 			}
 
-			// --- マルチメッシュモデルの描画 ---
 			if (enableModelDraw) {
+				// ★【追加】フェンス描画前に非加算合成（通常アルファ）用 PSO をセット
+				commandList->SetPipelineState(graphicsPipelineStateFence.Get());
+
 				commandList->SetGraphicsRootConstantBufferView(0, modelMaterialResource->GetGPUVirtualAddress());
 				commandList->SetGraphicsRootConstantBufferView(1, modelWvpResource->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);
+				commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPUFence);
 				commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
 
 				for (size_t i = 0; i < modelResource.meshes.size(); ++i) {
