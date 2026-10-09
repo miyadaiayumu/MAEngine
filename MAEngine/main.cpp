@@ -1290,6 +1290,187 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	);
 	assert(SUCCEEDED(hr));
 
+	// ================================================
+// Particle用 RootSignature の作成
+// ================================================
+
+// 1. ピクセルシェーダー用テクスチャの DescriptorRange (t0)
+	D3D12_DESCRIPTOR_RANGE descriptorRangeParticle[1]{};
+	descriptorRangeParticle[0].BaseShaderRegister = 0;
+	descriptorRangeParticle[0].NumDescriptors = 1;
+	descriptorRangeParticle[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	descriptorRangeParticle[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+	// 2. 頂点シェーダー用 Instancing (StructuredBuffer) の DescriptorRange (t0)
+	D3D12_DESCRIPTOR_RANGE descriptorRangeForInstancing[1]{};
+	descriptorRangeForInstancing[0].BaseShaderRegister = 0; // t0
+	descriptorRangeForInstancing[0].NumDescriptors = 1;
+	descriptorRangeForInstancing[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; // SRVを使う
+	descriptorRangeForInstancing[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+	// ルートパラメータの設定 (※PixelShader側でLightを使わない場合は全3個に減らします)
+	D3D12_ROOT_PARAMETER particleRootParameters[3]{};
+
+	// [0] Material用 CBV (PixelShader)
+	particleRootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	particleRootParameters[0].Descriptor.ShaderRegister = 0;
+	particleRootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	// [1] Instancing用 StructuredBuffer (VertexShader, SRV: t0)
+	particleRootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	particleRootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+	particleRootParameters[1].DescriptorTable.pDescriptorRanges = descriptorRangeForInstancing;
+	particleRootParameters[1].DescriptorTable.NumDescriptorRanges = _countof(descriptorRangeForInstancing);
+
+	// [2] Texture用 SRV (PixelShader, SRV: t0)
+	particleRootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	particleRootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	particleRootParameters[2].DescriptorTable.pDescriptorRanges = descriptorRangeParticle;
+	particleRootParameters[2].DescriptorTable.NumDescriptorRanges = _countof(descriptorRangeParticle);
+
+	// 静的サンプラー設定
+	D3D12_STATIC_SAMPLER_DESC particleStaticSamplers[1]{};
+	particleStaticSamplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+	particleStaticSamplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	particleStaticSamplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	particleStaticSamplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	particleStaticSamplers[0].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+	particleStaticSamplers[0].MaxLOD = D3D12_FLOAT32_MAX;
+	particleStaticSamplers[0].ShaderRegister = 0;
+	particleStaticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	// Description設定
+	D3D12_ROOT_SIGNATURE_DESC particleDescriptionRootSignature{};
+	particleDescriptionRootSignature.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	particleDescriptionRootSignature.pParameters = particleRootParameters;
+	particleDescriptionRootSignature.NumParameters = _countof(particleRootParameters);
+	particleDescriptionRootSignature.pStaticSamplers = particleStaticSamplers;
+	particleDescriptionRootSignature.NumStaticSamplers = _countof(particleStaticSamplers);
+
+	// シリアライズと生成
+	Microsoft::WRL::ComPtr<ID3DBlob> particleSignatureBlob;
+	Microsoft::WRL::ComPtr<ID3DBlob> particleErrorBlob;
+
+	hr = D3D12SerializeRootSignature(
+		&particleDescriptionRootSignature,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		&particleSignatureBlob,
+		&particleErrorBlob
+	);
+
+	if (FAILED(hr)) {
+		logger.Log((char*)particleErrorBlob->GetBufferPointer());
+		assert(false);
+	}
+
+	Microsoft::WRL::ComPtr<ID3D12RootSignature> particleRootSignature;
+
+	hr = device->CreateRootSignature(
+		0,
+		particleSignatureBlob->GetBufferPointer(),
+		particleSignatureBlob->GetBufferSize(),
+		IID_PPV_ARGS(&particleRootSignature)
+	);
+	assert(SUCCEEDED(hr));
+
+
+	// ================================================
+	// Particle用 各種ステート生成 (設定変更を見越して個別作成) [スライド指示]
+	// ================================================
+
+	// InputLayout
+	D3D12_INPUT_ELEMENT_DESC particleInputElementDescs[3]{};
+	particleInputElementDescs[0].SemanticName = "POSITION";
+	particleInputElementDescs[0].SemanticIndex = 0;
+	particleInputElementDescs[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	particleInputElementDescs[0].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+
+	particleInputElementDescs[1].SemanticName = "TEXCOORD";
+	particleInputElementDescs[1].SemanticIndex = 0;
+	particleInputElementDescs[1].Format = DXGI_FORMAT_R32G32_FLOAT;
+	particleInputElementDescs[1].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+
+	particleInputElementDescs[2].SemanticName = "NORMAL";
+	particleInputElementDescs[2].SemanticIndex = 0;
+	particleInputElementDescs[2].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+	particleInputElementDescs[2].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+
+	D3D12_INPUT_LAYOUT_DESC particleInputLayoutDesc{};
+	particleInputLayoutDesc.pInputElementDescs = particleInputElementDescs;
+	particleInputLayoutDesc.NumElements = _countof(particleInputElementDescs);
+
+	// BlendState (アルファブレンドまたは加算合成)
+	D3D12_BLEND_DESC particleBlendDesc{};
+	particleBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	particleBlendDesc.RenderTarget[0].BlendEnable = TRUE;
+	particleBlendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	particleBlendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+	particleBlendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	particleBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+	particleBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	particleBlendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+
+	// RasterizerState
+	D3D12_RASTERIZER_DESC particleRasterizerDesc{};
+	particleRasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
+	particleRasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+
+	// DepthStencilDesc (半透明描画に対応するためDepthWriteMaskをZEROにするのが一般的です)
+	D3D12_DEPTH_STENCIL_DESC particleDepthStencilDesc{};
+	particleDepthStencilDesc.DepthEnable = TRUE;
+	particleDepthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // 深度の書き込みをOFFに設定
+	particleDepthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+
+	// ================================================
+	// Particle用 Shader Compile [スライド指示]
+	// ================================================
+	Microsoft::WRL::ComPtr<IDxcBlob> particleVSBlob;
+	particleVSBlob.Attach(CompileShader(
+		L"Particle.VS.hlsl",
+		L"vs_6_0",
+		dxcUtils.Get(),
+		dxcCompiler.Get(),
+		includeHandler.Get()
+	));
+
+	Microsoft::WRL::ComPtr<IDxcBlob> particlePSBlob;
+	particlePSBlob.Attach(CompileShader(
+		L"Particle.PS.hlsl",
+		L"ps_6_0",
+		dxcUtils.Get(),
+		dxcCompiler.Get(),
+		includeHandler.Get()
+	));
+
+
+	// ================================================
+	// Particle用 GraphicsPipelineState の生成
+	// ================================================
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC particlePipelineStateDesc{};
+	particlePipelineStateDesc.pRootSignature = particleRootSignature.Get(); // Particle用RootSignatureを設定
+	particlePipelineStateDesc.InputLayout = particleInputLayoutDesc;
+	particlePipelineStateDesc.VS.pShaderBytecode = particleVSBlob->GetBufferPointer(); // Particle用VSを設定
+	particlePipelineStateDesc.VS.BytecodeLength = particleVSBlob->GetBufferSize();
+	particlePipelineStateDesc.PS.pShaderBytecode = particlePSBlob->GetBufferPointer(); // Particle用PSを設定
+	particlePipelineStateDesc.PS.BytecodeLength = particlePSBlob->GetBufferSize();
+	particlePipelineStateDesc.BlendState = particleBlendDesc;
+	particlePipelineStateDesc.RasterizerState = particleRasterizerDesc;
+	particlePipelineStateDesc.DepthStencilState = particleDepthStencilDesc;
+	particlePipelineStateDesc.NumRenderTargets = 1;
+	particlePipelineStateDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	particlePipelineStateDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	particlePipelineStateDesc.SampleDesc.Count = 1;
+	particlePipelineStateDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
+	particlePipelineStateDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> particlePipelineState;
+	hr = device->CreateGraphicsPipelineState(
+		&particlePipelineStateDesc,
+		IID_PPV_ARGS(&particlePipelineState)
+	);
+	assert(SUCCEEDED(hr));
+
 	const uint32_t kSubdivision = 16;
 	const uint32_t kVertexCountSphere = kSubdivision * kSubdivision * 6;
 	std::vector<VertexData> sphereVertices(kVertexCountSphere);
@@ -1699,7 +1880,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	device->CreateShaderResourceView(textureResourceSprite.Get(), &srvDescSprite, srvHandleCPUSprite);
 
 	// フェンス用テクスチャの読み込みとSRV作成
-	DirectX::ScratchImage mipImagesFence = LoadTexture("resources/fence.png"); 
+	DirectX::ScratchImage mipImagesFence = LoadTexture("resources/fence.png");
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> textureResourceFence;
 	textureResourceFence.Attach(CreateTextureResource(device.Get(), mipImagesFence.GetMetadata()));
@@ -1718,6 +1899,46 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	srvDescFence.Texture2D.MipLevels = static_cast<UINT>(mipImagesFence.GetMetadata().mipLevels);
 
 	device->CreateShaderResourceView(textureResourceFence.Get(), &srvDescFence, srvHandleCPUFence);
+
+	// =========================================================
+	// Instancing用 Resource と SRV の作成
+	// =========================================================
+	const uint32_t kNumInstance = 10; // インスタンス数
+
+	// Instancing用に最大数分のTransformを用意
+	Transform transforms[kNumInstance];
+	for (uint32_t index = 0; index < kNumInstance; ++index) {
+		transforms[index].scale = { 1.0f, 1.0f, 1.0f };
+		transforms[index].rotate = { 0.0f, 0.0f, 0.0f };
+		transforms[index].translate = { index * 0.1f, index * 0.1f, index * 0.1f }; // 位置をずらす
+	}
+
+	// 1. Resourceの作成と初期化
+	Microsoft::WRL::ComPtr<ID3D12Resource> instancingResource;
+	instancingResource.Attach(CreateBufferResource(device.Get(), sizeof(TransformationMatrix) * kNumInstance));
+
+	TransformationMatrix* instancingData = nullptr;
+	instancingResource->Map(0, nullptr, reinterpret_cast<void**>(&instancingData));
+
+	for (uint32_t index = 0; index < kNumInstance; ++index) {
+		instancingData[index].WVP = MakeIdentity4x4();
+		instancingData[index].World = MakeIdentity4x4();
+	}
+
+	// 2. StructuredBuffer用 SRV の作成
+	D3D12_SHADER_RESOURCE_VIEW_DESC instancingSrvDesc{};
+	instancingSrvDesc.Format = DXGI_FORMAT_UNKNOWN;
+	instancingSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	instancingSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	instancingSrvDesc.Buffer.FirstElement = 0;
+	instancingSrvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+	instancingSrvDesc.Buffer.NumElements = kNumInstance;
+	instancingSrvDesc.Buffer.StructureByteStride = sizeof(TransformationMatrix);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE instancingSrvHandleCPU = GetCPUDescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 4);
+	D3D12_GPU_DESCRIPTOR_HANDLE instancingSrvHandleGPU = GetGPUDescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 4);
+
+	device->CreateShaderResourceView(instancingResource.Get(), &instancingSrvDesc, instancingSrvHandleCPU);
 
 	ShowWindow(hwnd, SW_SHOW);
 
@@ -1882,18 +2103,32 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			Matrix4x4 viewMatrix = Matrix4x4::Inverse(cameraMatrix);
 			Matrix4x4 projectionMatrix = Matrix4x4::MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.01f, 100.0f);
 
+			// ★【追加】ビュープロジェクション行列の計算 (viewProjectionMatrix の定義)
+			Matrix4x4 viewProjectionMatrix = Matrix4x4::Multiply(viewMatrix, projectionMatrix);
+
 			// 平面 (Plane) の行列計算
 			Matrix4x4 worldMatrix = Matrix4x4::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
-			wvpData->WVP = Matrix4x4::Multiply(worldMatrix, Matrix4x4::Multiply(viewMatrix, projectionMatrix));
+			wvpData->WVP = Matrix4x4::Multiply(worldMatrix, viewProjectionMatrix);
 			wvpData->World = worldMatrix;
+
+			// =========================================================
+			// Instancing用の行列計算・データ更新 
+			// =========================================================
+			for (uint32_t index = 0; index < kNumInstance; ++index) {
+				Matrix4x4 worldMat = Matrix4x4::MakeAffineMatrix(transforms[index].scale, transforms[index].rotate, transforms[index].translate);
+				Matrix4x4 worldViewProjectionMatrix = Matrix4x4::Multiply(worldMat, viewProjectionMatrix);
+
+				instancingData[index].WVP = worldViewProjectionMatrix;
+				instancingData[index].World = worldMat;
+			}
 
 			// 球体 (Sphere) の行列計算
 			Matrix4x4 worldMatrixSphere = Matrix4x4::MakeAffineMatrix(sphereTransform.scale, sphereTransform.rotate, sphereTransform.translate);
-			wvpDataSphere->WVP = Matrix4x4::Multiply(worldMatrixSphere, Matrix4x4::Multiply(viewMatrix, projectionMatrix));
+			wvpDataSphere->WVP = Matrix4x4::Multiply(worldMatrixSphere, viewProjectionMatrix);
 			wvpDataSphere->World = worldMatrixSphere;
 
 			Matrix4x4 worldMatrixModel = Matrix4x4::MakeAffineMatrix(modelTransform.scale, modelTransform.rotate, modelTransform.translate);
-			modelWvpData->WVP = Matrix4x4::Multiply(worldMatrixModel, Matrix4x4::Multiply(viewMatrix, projectionMatrix));
+			modelWvpData->WVP = Matrix4x4::Multiply(worldMatrixModel, viewProjectionMatrix);
 			modelWvpData->World = worldMatrixModel;
 
 			// --- スプライトの行列計算（そのまま残す） ---
@@ -1940,6 +2175,25 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() };
 			commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
+			// =========================================================
+			// Particle (Instancing) の描画 [スライド12]
+			// =========================================================
+			commandList->SetPipelineState(particlePipelineState.Get());
+			commandList->SetGraphicsRootSignature(particleRootSignature.Get());
+
+			// ルートパラメータの設定
+			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Material
+			commandList->SetGraphicsRootDescriptorTable(1, instancingSrvHandleGPU);                       // Instancing SRV [スライド12]
+			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);                            // Texture SRV
+
+			// 描画インスタンス数が確保数(kNumInstance)を超えないかチェック
+			assert(kNumInstance <= 10);
+
+			// 平面メッシュの頂点バッファを使って Instancing 描画を発行 
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			commandList->DrawInstanced(UINT(planeVertices.size()), kNumInstance, 0, 0);
+
 			commandList->SetPipelineState(graphicsPipelineState.Get());
 			commandList->SetGraphicsRootSignature(rootSignature.Get());
 
@@ -1969,7 +2223,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			}
 
 			if (enableModelDraw) {
-				// ★【追加】フェンス描画前に非加算合成（通常アルファ）用 PSO をセット
+				// フェンス描画前に非加算合成（通常アルファ）用 PSO をセット
 				commandList->SetPipelineState(graphicsPipelineStateFence.Get());
 
 				commandList->SetGraphicsRootConstantBufferView(0, modelMaterialResource->GetGPUVirtualAddress());
@@ -2008,6 +2262,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			hr = commandList->Close();
 			assert(SUCCEEDED(hr));
 
+			// ★【修正】アスタリスク '*' を追加
 			ID3D12CommandList* commandLists[] = { commandList.Get() };
 			commandQueue->ExecuteCommandLists(1, commandLists);
 
