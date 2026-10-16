@@ -20,6 +20,7 @@
 #include <vector>
 #include"Matrix4x4.h"
 #include"Vector3.h"
+#include<random>
 
 #ifdef USE_IMGUI
 #include"externals/imgui/imgui.h"
@@ -80,6 +81,11 @@ struct Transform {
 	Vector3 scale;
 	Vector3 rotate;
 	Vector3 translate;
+};
+
+struct Particle {
+	Transform transform;
+	Vector3 velocity;
 };
 
 //Tranceform変数を作る
@@ -1906,11 +1912,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	const uint32_t kNumInstance = 10; // インスタンス数
 
 	// Instancing用に最大数分のTransformを用意
-	Transform transforms[kNumInstance];
+	Particle particles[kNumInstance];
 	for (uint32_t index = 0; index < kNumInstance; ++index) {
-		transforms[index].scale = { 1.0f, 1.0f, 1.0f };
-		transforms[index].rotate = { 0.0f, 0.0f, 0.0f };
-		transforms[index].translate = { index * 0.1f, index * 0.1f, index * 0.1f }; // 位置をずらす
+		particles[index].transform.scale = { 1.0f, 1.0f, 1.0f };
+		particles[index].transform.rotate = { 0.0f, 0.0f, 0.0f };
+		particles[index].transform.translate = { index * 0.1f, index * 0.1f, index * 0.1f }; // 位置をずらす
 	}
 
 	// 1. Resourceの作成と初期化
@@ -2115,11 +2121,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// Instancing用の行列計算・データ更新 
 			// =========================================================
 			for (uint32_t index = 0; index < kNumInstance; ++index) {
-				Matrix4x4 worldMat = Matrix4x4::MakeAffineMatrix(transforms[index].scale, transforms[index].rotate, transforms[index].translate);
+				Matrix4x4 worldMat = Matrix4x4::MakeAffineMatrix(particles[index].transform.scale, particles[index].transform.rotate, particles[index].transform.translate);
 				Matrix4x4 worldViewProjectionMatrix = Matrix4x4::Multiply(worldMat, viewProjectionMatrix);
 
 				instancingData[index].WVP = worldViewProjectionMatrix;
 				instancingData[index].World = worldMat;
+
+
 			}
 
 			// 球体 (Sphere) の行列計算
