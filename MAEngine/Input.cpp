@@ -42,6 +42,10 @@ void Input::Initialize(HINSTANCE hInstance, HWND hwnd)
 
 void Input::Update()
 {
+
+	// 前フレームのキー状態を保存
+	memcpy(keyPre, key, sizeof(key));
+
     // 入力更新処理
     keyboard->Acquire();
     
@@ -56,5 +60,13 @@ bool Input::PushKey(BYTE keyNumber)
 		return true;
     }
 
+    return false;
+}
+
+bool Input::TriggerKey(BYTE keyNumber)
+{
+    if (key[keyNumber] && !keyPre[keyNumber]) {
+        return true;
+    }
     return false;
 }

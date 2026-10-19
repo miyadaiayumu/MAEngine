@@ -1955,9 +1955,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	SoundData soundData1 = SoundLoadWave("resources/fanfare.wav");
 
-	input->Update();
 	
-	//BYTE keyPre[256] = {};
 
 	MSG msg{};
 	while (msg.message != WM_QUIT) {
@@ -1965,30 +1963,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		} else {
+
 			// --------------------------------------------------
 			// DirectInput 毎フレーム更新処理 
 			// --------------------------------------------------
-			// 前フレームのキー状態を保存
-			//std::memcpy(keyPre, key, sizeof(key));
-
-			//
-
-			//// デバイスがロストしている、または取得できていない場合
-			//if (hrState == DIERR_INPUTLOST || hrState == DIERR_NOTACQUIRED) {
-			//	// 再取得を試みる
-			//	hrAcquire = keyboard->Acquire();
-			//	if (SUCCEEDED(hrAcquire)) {
-			//		// 再取得に成功したら、もう一度データを読み直す
-			//		keyboard->GetDeviceState(sizeof(key), key);
-			//	} else {
-			//		// 完全にロストしている場合は入力をクリアして安全を保つ
-			//		std::memset(key, 0, sizeof(key));
-			//	}
-			//}
-
-			//if (key[DIK_0]) {
-			//	OutputDebugStringA("Hit 0\n");
-			//}
+			input->Update(); // 入力の更新
+			
+			// 0キーが押された瞬間（トリガー）に「Hit 0」を出力する
+			if (input->TriggerKey(DIK_0)) {
+				OutputDebugStringA("Hit 0\n");
+			}
 
 #ifdef USE_IMGUI
 			ImGui_ImplDX12_NewFrame();
