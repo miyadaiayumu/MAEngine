@@ -20,6 +20,7 @@
 #include <vector>
 #include"Matrix4x4.h"
 #include"Vector3.h"
+#include"Input.h"
 
 #ifdef USE_IMGUI
 #include"externals/imgui/imgui.h"
@@ -1291,10 +1292,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	assert(SUCCEEDED(hr));
 
 	// ================================================
-// Particle用 RootSignature の作成
-// ================================================
+	// Particle用 RootSignature の作成
+	// ================================================
 
-// 1. ピクセルシェーダー用テクスチャの DescriptorRange (t0)
+	// 1. ピクセルシェーダー用テクスチャの DescriptorRange (t0)
 	D3D12_DESCRIPTOR_RANGE descriptorRangeParticle[1]{};
 	descriptorRangeParticle[0].BaseShaderRegister = 0;
 	descriptorRangeParticle[0].NumDescriptors = 1;
@@ -1942,40 +1943,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	ShowWindow(hwnd, SW_SHOW);
 
-	// 1. DirectInputオブジェクトの生成
-	Microsoft::WRL::ComPtr<IDirectInput8> directInput;
-	hr = DirectInput8Create(
-		wc.hInstance,
-		DIRECTINPUT_VERSION,
-		IID_IDirectInput8,
-		reinterpret_cast<void**>(directInput.GetAddressOf()),
-		nullptr
-	);
-	assert(SUCCEEDED(hr));
+	// // ポインタ
+	Input* input = nullptr;
 
-	// 2. キーボードデバイスの生成
-	Microsoft::WRL::ComPtr<IDirectInputDevice8> keyboard;
-	hr = directInput->CreateDevice(GUID_SysKeyboard, keyboard.GetAddressOf(), nullptr);
-	assert(SUCCEEDED(hr));
-
-	// 3. 入力データ形式のセット
-	hr = keyboard->SetDataFormat(&c_dfDIKeyboard);
-	assert(SUCCEEDED(hr));
-
-	// 4. 排他制御レベルのセット
-	hr = keyboard->SetCooperativeLevel(
-		hwnd,
-		DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY
-	);
-	assert(SUCCEEDED(hr));
+	// // 入力の初期化
+	input = new Input();
+	input->Initialize(wc.hInstance, hwnd);
 
 	// ========================
 	// 音声読み込み
 	// ========================
 	SoundData soundData1 = SoundLoadWave("resources/fanfare.wav");
 
-	BYTE key[256] = {};
-	BYTE keyPre[256] = {};
+	input->Update();
+	
+	//BYTE keyPre[256] = {};
 
 	MSG msg{};
 	while (msg.message != WM_QUIT) {
@@ -1987,30 +1969,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			// DirectInput 毎フレーム更新処理 
 			// --------------------------------------------------
 			// 前フレームのキー状態を保存
-			std::memcpy(keyPre, key, sizeof(key));
+			//std::memcpy(keyPre, key, sizeof(key));
 
-			// 1. キーボード情報の取得開始 (戻り値を受け取る)
-			HRESULT hrAcquire = keyboard->Acquire();
+			//
 
-			// 2. 全キーの入力状態を取得する (戻り値を受け取る)
-			HRESULT hrState = keyboard->GetDeviceState(sizeof(key), key);
+			//// デバイスがロストしている、または取得できていない場合
+			//if (hrState == DIERR_INPUTLOST || hrState == DIERR_NOTACQUIRED) {
+			//	// 再取得を試みる
+			//	hrAcquire = keyboard->Acquire();
+			//	if (SUCCEEDED(hrAcquire)) {
+			//		// 再取得に成功したら、もう一度データを読み直す
+			//		keyboard->GetDeviceState(sizeof(key), key);
+			//	} else {
+			//		// 完全にロストしている場合は入力をクリアして安全を保つ
+			//		std::memset(key, 0, sizeof(key));
+			//	}
+			//}
 
-			// デバイスがロストしている、または取得できていない場合
-			if (hrState == DIERR_INPUTLOST || hrState == DIERR_NOTACQUIRED) {
-				// 再取得を試みる
-				hrAcquire = keyboard->Acquire();
-				if (SUCCEEDED(hrAcquire)) {
-					// 再取得に成功したら、もう一度データを読み直す
-					keyboard->GetDeviceState(sizeof(key), key);
-				} else {
-					// 完全にロストしている場合は入力をクリアして安全を保つ
-					std::memset(key, 0, sizeof(key));
-				}
-			}
-
-			if (key[DIK_0]) {
-				OutputDebugStringA("Hit 0\n");
-			}
+			//if (key[DIK_0]) {
+			//	OutputDebugStringA("Hit 0\n");
+			//}
 
 #ifdef USE_IMGUI
 			ImGui_ImplDX12_NewFrame();
@@ -2262,7 +2240,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			hr = commandList->Close();
 			assert(SUCCEEDED(hr));
 
-			// ★【修正】アスタリスク '*' を追加
+			// アスタリスク '*' を追加
 			ID3D12CommandList* commandLists[] = { commandList.Get() };
 			commandQueue->ExecuteCommandLists(1, commandLists);
 
@@ -2292,6 +2270,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// 2. その後に音声データのメモリを安全に解放
 	SoundUnload(&soundData1);
+
+	delete input;
 
 #ifdef USE_IMGUI
 	ImGui_ImplDX12_Shutdown();
