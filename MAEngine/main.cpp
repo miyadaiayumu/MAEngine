@@ -1894,7 +1894,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// // 入力の初期化
 	input = new Input();
-	input->Initialize(winApp->GetHInstance(), hwnd);
+	input->Initialize(winApp->GetHInstance(), winApp->GetHwnd());
 
 	// ========================
 	// 音声読み込み
