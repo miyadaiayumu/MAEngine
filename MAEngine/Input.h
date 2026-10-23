@@ -19,6 +19,7 @@ public:
 
 private:
 	Microsoft::WRL::ComPtr<IDirectInputDevice8> keyboard;
+	Microsoft::WRL::ComPtr<IDirectInput8> directInput;
 
 	BYTE key[256] = {};
 	BYTE keyPre[256] = {};

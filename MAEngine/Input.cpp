@@ -4,15 +4,12 @@
 #pragma comment(lib, "dinput8.lib")
 #pragma comment(lib, "dxguid.lib")
 
-//using namespace Microsoft::WRL;
-
 void Input::Initialize(HINSTANCE hInstance, HWND hwnd)
 {
 
 	HRESULT hr;
 
     // 1. DirectInputオブジェクトの生成
-    Microsoft::WRL::ComPtr<IDirectInput8> directInput;
     hr = DirectInput8Create(
         hInstance,
         DIRECTINPUT_VERSION,
@@ -24,7 +21,6 @@ void Input::Initialize(HINSTANCE hInstance, HWND hwnd)
     assert(SUCCEEDED(hr));
 
     // 2. キーボードデバイスの生成
-    //Microsoft::WRL::ComPtr<IDirectInputDevice8> keyboard;
     hr = directInput->CreateDevice(GUID_SysKeyboard, keyboard.GetAddressOf(), nullptr);
     assert(SUCCEEDED(hr));
 
