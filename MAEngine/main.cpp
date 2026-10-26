@@ -91,9 +91,9 @@ struct Particle {
 };
 
 //Tranceform変数を作る
-Transform transform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,0.0f,} };
+Transform transform{ { 1.0f,1.0f,1.0f },{ 0.0f,0.0f,0.0f, },{ 0.0f,0.0f,0.0f, } };
 
-Transform cameraTransform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f,},{0.0f,0.0f,-3.0f,} };
+Transform cameraTransform{ { 1.0f,1.0f,1.0f },{ 0.0f,0.0f,0.0f, },{ 0.0f,0.0f,-3.0f, } };
 
 std::string GetTimeStringForFile() {
 	auto now = std::chrono::system_clock::now();
@@ -801,7 +801,8 @@ bool IsReleaseTriggerKey(BYTE* key, BYTE* keyPre, uint8_t keyNumber) {
 
 // Windowsアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
-	CoInitializeEx(0, COINIT_MULTITHREADED);
+
+	HRESULT hr;
 
 	// ポインタ
 	Input* input = nullptr;
@@ -814,7 +815,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	winApp = new WinApp();
 	winApp->Initialize();
-	HWND hwnd = winApp->GetHwnd();
+	winApp->GetHwnd();
 
 	SetUnhandledExceptionFilter(ExportDump);
 
@@ -839,7 +840,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// DXGIファクトリ生成
 	// ========================
 	Microsoft::WRL::ComPtr<IDXGIFactory7> dxgiFactory;
-	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory));
+	hr = CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory));
 	assert(SUCCEEDED(hr));
 
 	// ========================
@@ -918,7 +919,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// DescriptorSizeを取得しておく
 	const uint32_t descriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	const uint32_t descriptorSizeRTV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	
+
 	// 失敗したら即終了
 	assert(device != nullptr);
 
@@ -1482,14 +1483,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// --- 左手座標系（時計回り）の平面頂点データ ---
 	std::vector<VertexData> planeVertices = {
 		// 1つ目の三角形 (左上 -> 右上 -> 左下)
-		{ { -0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } }, // 左上
-		{ {  0.5f,  0.5f, 0.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } }, // 右上
-		{ { -0.5f, -0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f }, { 0.0f, 0.0f, -1.0f } }, // 左下
+		{ { -0.5f,  0.5f, 0.0f, 1.0f },{ 0.0f, 0.0f },{ 0.0f, 0.0f, -1.0f } }, // 左上
+		{ { 0.5f,  0.5f, 0.0f, 1.0f },{ 1.0f, 0.0f },{ 0.0f, 0.0f, -1.0f } }, // 右上
+		{ { -0.5f, -0.5f, 0.0f, 1.0f },{ 0.0f, 1.0f },{ 0.0f, 0.0f, -1.0f } }, // 左下
 
 		// 2つ目の三角形 (左下 -> 右上 -> 右下)
-		{ { -0.5f, -0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f }, { 0.0f, 0.0f, -1.0f } }, // 左下
-		{ {  0.5f,  0.5f, 0.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } }, // 右上
-		{ {  0.5f, -0.5f, 0.0f, 1.0f }, { 1.0f, 1.0f }, { 0.0f, 0.0f, -1.0f } }, // 右下
+		{ { -0.5f, -0.5f, 0.0f, 1.0f },{ 0.0f, 1.0f },{ 0.0f, 0.0f, -1.0f } }, // 左下
+		{ { 0.5f,  0.5f, 0.0f, 1.0f },{ 1.0f, 0.0f },{ 0.0f, 0.0f, -1.0f } }, // 右上
+		{ { 0.5f, -0.5f, 0.0f, 1.0f },{ 1.0f, 1.0f },{ 0.0f, 0.0f, -1.0f } }, // 右下
 	};
 
 	// テクスチャの読み込み（パスを直接指定）
@@ -1599,7 +1600,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	}
 
 	// モデル操作用のTransform定義（これをメインループの手前に追加）
-	Transform modelTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+	Transform modelTransform{ { 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.0f },{ 0.0f, 0.0f, 0.0f } };
 
 	// --- スプライト用頂点データ（単位サイズ化） ---
 	vertexDataSprite[0].position = { 0.0f, 1.0f, 0.0f, 1.0f }; // 左下
@@ -1707,7 +1708,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Microsoft::WRL::ComPtr<IDXGISwapChain4> swapChain;
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
-	swapChainDesc.Width =WinApp:: kClientWidth;
+	swapChainDesc.Width = WinApp::kClientWidth;
 	swapChainDesc.Height = WinApp::kClientHeight;
 	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	swapChainDesc.SampleDesc.Count = 1;
@@ -1717,7 +1718,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	hr = dxgiFactory->CreateSwapChainForHwnd(
 		commandQueue.Get(),
-		hwnd,
+		winApp->GetHwnd(),
 		&swapChainDesc,
 		nullptr,
 		nullptr,
@@ -1768,7 +1769,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
 
-	ImGui_ImplWin32_Init(hwnd);
+	ImGui_ImplWin32_Init(winApp->GetHwnd());
 	ImGui_ImplDX12_Init(
 		device.Get(),
 		swapChainDesc.BufferCount,
@@ -1801,11 +1802,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	materialDataSphere->uvTransform = MakeIdentity4x4();
 
 	// --- 各物体の初期位置設定（重なりを防ぐために左右に配置）
-	Transform sphereTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {-1.2f, 0.0f, 0.0f} }; // 球体 (左に1.2)
+	Transform sphereTransform{ { 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.0f },{ -1.2f, 0.0f, 0.0f } }; // 球体 (左に1.2)
 
 	// 2D Sprite (画面左上付近に配置)
-	Transform transformSprite{ {200.0f, 200.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {100.0f, 100.0f, 0.0f} };
-	Transform uvTransformSprite{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+	Transform transformSprite{ { 200.0f, 200.0f, 1.0f },{ 0.0f, 0.0f, 0.0f },{ 100.0f, 100.0f, 0.0f } };
+	Transform uvTransformSprite{ { 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.0f },{ 0.0f, 0.0f, 0.0f } };
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResourceSphere;
 	wvpResourceSphere.Attach(CreateBufferResource(device.Get(), 256));
@@ -1896,304 +1897,304 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	device->CreateShaderResourceView(instancingResource.Get(), &instancingSrvDesc, instancingSrvHandleCPU);
 
-	//ShowWindow(hwnd, SW_SHOW);
 
 	// // 入力の初期化
 	input = new Input();
-	input->Initialize(winApp->GetHInstance(), winApp->GetHwnd());
+	input->Initialize(winApp);
 
 	// ========================
 	// 音声読み込み
 	// ========================
 	SoundData soundData1 = SoundLoadWave("resources/fanfare.wav");
 
-	MSG msg{};
-	while (msg.message != WM_QUIT) {
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		} else {
+	while (true) {   // ゲームループ
 
-			// --------------------------------------------------
-			// DirectInput 毎フレーム更新処理 
-			// --------------------------------------------------
-			input->Update(); // 入力の更新
-			
-			// 0キーが押された瞬間（トリガー）に「Hit 0」を出力する
-			if (input->TriggerKey(DIK_0)) {
-				OutputDebugStringA("Hit 0\n");
-			}
+		// Windowsのメッセージ処理
+		if (winApp->ProcessMessage()) {
+			// ゲームループを抜ける
+			break;
+		}
 
-#ifdef USE_IMGUI
-			ImGui_ImplDX12_NewFrame();
-			ImGui_ImplWin32_NewFrame();
-			ImGui::NewFrame();
+		// --------------------------------------------------
+		// DirectInput 毎フレーム更新処理 
+		// --------------------------------------------------
+		input->Update(); // 入力の更新
 
-			ImGui::Begin("Settings");
-
-			// 開いておくノード（DefaultOpen）
-			if (ImGui::TreeNodeEx("Rendering Switch", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::Checkbox("Draw Plane", &enablePlaneDraw);
-				ImGui::Checkbox("Draw Model", &enableModelDraw);
-				ImGui::Checkbox("Draw Sphere", &enableSphereDraw);
-				ImGui::Checkbox("Draw Sprite", &enableSpriteDraw);
-				ImGui::TreePop();
-			}
-
-			// 1. 平面 (Plane) - 開いておく
-			if (ImGui::TreeNodeEx("Object (Plane)", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::ColorEdit4("Material Color", &materialData->color.x);
-				ImGui::SliderFloat3("Translate", &transform.translate.x, -10.0f, 10.0f);
-				ImGui::SliderFloat3("Rotate", &transform.rotate.x, -3.14f, 3.14f);
-				ImGui::SliderFloat3("Scale", &transform.scale.x, 0.1f, 10.0f);
-				ImGui::TreePop();
-			}
-
-			// 2. 球体 (Sphere) - 初期状態は閉じる (0 を指定)
-			if (ImGui::TreeNodeEx("Object (Sphere)", 0)) {
-				ImGui::ColorEdit4("Color##Sphere", &materialDataSphere->color.x);
-				ImGui::SliderFloat3("Translate##Sphere", &sphereTransform.translate.x, -10.0f, 10.0f);
-				ImGui::SliderFloat3("Rotate##Sphere", &sphereTransform.rotate.x, -3.14f, 3.14f);
-				ImGui::SliderFloat3("Scale##Sphere", &sphereTransform.scale.x, 0.1f, 10.0f);
-				ImGui::TreePop();
-			}
-
-			// 3. スプライト (Sprite) - 初期状態は閉じる (0 を指定)
-			if (ImGui::TreeNodeEx("Object (Sprite)", 0)) {
-				ImGui::SliderFloat3("Translate##Sprite", &transformSprite.translate.x, -500.0f, 1280.0f);
-				ImGui::SliderFloat3("Rotate##Sprite", &transformSprite.rotate.x, -3.14f, 3.14f);
-				ImGui::SliderFloat3("Scale##Sprite", &transformSprite.scale.x, 1.0f, 1000.0f);
-
-				if (ImGui::TreeNode("UV Transform##Sprite")) {
-					ImGui::SliderFloat2("UV Translate", &uvTransformSprite.translate.x, -10.0f, 10.0f);
-					ImGui::SliderFloat("UV Rotate", &uvTransformSprite.rotate.z, -3.14f, 3.14f);
-					ImGui::SliderFloat2("UV Scale", &uvTransformSprite.scale.x, 0.1f, 10.0f);
-					ImGui::TreePop();
-				}
-				ImGui::TreePop();
-			}
-
-			// モデル (Model) - 初期状態は閉じる (0 を指定)
-			if (ImGui::TreeNodeEx("Object (Model)", 0)) {
-				ImGui::ColorEdit4("Color##Model", &modelMaterialData->color.x);
-				ImGui::SliderFloat3("Translate##Model", &modelTransform.translate.x, -10.0f, 10.0f);
-				ImGui::SliderFloat3("Rotate##Model", &modelTransform.rotate.x, -3.14f, 3.14f);
-				ImGui::SliderFloat3("Scale##Model", &modelTransform.scale.x, 0.1f, 10.0f);
-				ImGui::TreePop();
-			}
-
-			// 4. ライト (Light) - 開いておく (DefaultOpen)
-			if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::ColorEdit4("LightColor", &directionalLightData->color.x);
-				ImGui::SliderFloat3("LightDirection", &directionalLightData->direction.x, -1.0f, 1.0f);
-				ImGui::SliderFloat("Intensity", &directionalLightData->intensity, 0.0f, 10.0f);
-
-				static int currentLightingType = 1;
-
-				const char* lightingItems[] = { "None", "Lambert", "Half Lambert" };
-				if (ImGui::Combo("Lighting Type", &currentLightingType, lightingItems, IM_ARRAYSIZE(lightingItems))) {
-					materialData->lightingType = currentLightingType;
-					materialDataSphere->lightingType = currentLightingType;
-					modelMaterialData->lightingType = currentLightingType;
-				}
-
-				ImGui::TreePop();
-			}
-
-			// 5. サウンドコントロール - 初期状態は閉じる (0 を指定)
-			if (ImGui::TreeNodeEx("Sound Control", 0)) {
-				if (ImGui::Button("Play Fanfare")) {
-					SoundPlayWave(xAudio2.Get(), soundData1);
-				}
-				ImGui::TreePop();
-			}
-
-			ImGui::End();
-#endif
-
-			Matrix4x4 cameraMatrix = Matrix4x4::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
-			Matrix4x4 viewMatrix = Matrix4x4::Inverse(cameraMatrix);
-			Matrix4x4 projectionMatrix = Matrix4x4::MakePerspectiveFovMatrix(0.45f, float(WinApp::kClientWidth) / float(WinApp::kClientHeight), 0.01f, 100.0f);
-
-			// ビュープロジェクション行列の計算 (viewProjectionMatrix の定義)
-			Matrix4x4 viewProjectionMatrix = Matrix4x4::Multiply(viewMatrix, projectionMatrix);
-
-			// 平面 (Plane) の行列計算
-			Matrix4x4 worldMatrix = Matrix4x4::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
-			wvpData->WVP = Matrix4x4::Multiply(worldMatrix, viewProjectionMatrix);
-			wvpData->World = worldMatrix;
-
-			// =========================================================
-			// Instancing用の行列計算・データ更新 
-			// =========================================================
-			for (uint32_t index = 0; index < kNumInstance; ++index) {
-				Matrix4x4 worldMat = Matrix4x4::MakeAffineMatrix(particles[index].transform.scale, particles[index].transform.rotate, particles[index].transform.translate);
-				Matrix4x4 worldViewProjectionMatrix = Matrix4x4::Multiply(worldMat, viewProjectionMatrix);
-
-				instancingData[index].WVP = worldViewProjectionMatrix;
-				instancingData[index].World = worldMat;
-			}
-
-			// 球体 (Sphere) の行列計算
-			Matrix4x4 worldMatrixSphere = Matrix4x4::MakeAffineMatrix(sphereTransform.scale, sphereTransform.rotate, sphereTransform.translate);
-			wvpDataSphere->WVP = Matrix4x4::Multiply(worldMatrixSphere, viewProjectionMatrix);
-			wvpDataSphere->World = worldMatrixSphere;
-
-			Matrix4x4 worldMatrixModel = Matrix4x4::MakeAffineMatrix(modelTransform.scale, modelTransform.rotate, modelTransform.translate);
-			modelWvpData->WVP = Matrix4x4::Multiply(worldMatrixModel, viewProjectionMatrix);
-			modelWvpData->World = worldMatrixModel;
-
-			// --- スプライトの行列計算（そのまま残す） ---
-			Matrix4x4 worldMatrixSprite = Matrix4x4::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
-			Matrix4x4 viewMatrixSprite = MakeIdentity4x4();
-			Matrix4x4 projectionMatrixSprite = Matrix4x4::MakeOrthographicMatrix(0.0f, 0.0f, float(WinApp::kClientWidth), float(WinApp::kClientHeight), 0.0f, 100.0f);
-			*transformationMatrixDataSprite = Matrix4x4::Multiply(worldMatrixSprite, Matrix4x4::Multiply(viewMatrixSprite, projectionMatrixSprite));
-
-			Matrix4x4 uvScaleMat = Matrix4x4::MakeScaleMatrix(uvTransformSprite.scale);
-			Matrix4x4 uvRotMat = Matrix4x4::MakeRotateZMatrix(uvTransformSprite.rotate.z);
-			Matrix4x4 uvTransMat = Matrix4x4::MakeTranslateMatrix(uvTransformSprite.translate);
-			Matrix4x4 uvTransformMatrix = Matrix4x4::Multiply(uvScaleMat, Matrix4x4::Multiply(uvRotMat, uvTransMat));
-
-			materialDataSprite->uvTransform = uvTransformMatrix;
+		// 0キーが押された瞬間（トリガー）に「Hit 0」を出力する
+		if (input->TriggerKey(DIK_0)) {
+			OutputDebugStringA("Hit 0\n");
+		}
 
 #ifdef USE_IMGUI
-			ImGui::Render();
+		ImGui_ImplDX12_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+		ImGui::Begin("Settings");
+
+		// 開いておくノード（DefaultOpen）
+		if (ImGui::TreeNodeEx("Rendering Switch", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox("Draw Plane", &enablePlaneDraw);
+			ImGui::Checkbox("Draw Model", &enableModelDraw);
+			ImGui::Checkbox("Draw Sphere", &enableSphereDraw);
+			ImGui::Checkbox("Draw Sprite", &enableSpriteDraw);
+			ImGui::TreePop();
+		}
+
+		// 1. 平面 (Plane) - 開いておく
+		if (ImGui::TreeNodeEx("Object (Plane)", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::ColorEdit4("Material Color", &materialData->color.x);
+			ImGui::SliderFloat3("Translate", &transform.translate.x, -10.0f, 10.0f);
+			ImGui::SliderFloat3("Rotate", &transform.rotate.x, -3.14f, 3.14f);
+			ImGui::SliderFloat3("Scale", &transform.scale.x, 0.1f, 10.0f);
+			ImGui::TreePop();
+		}
+
+		// 2. 球体 (Sphere) - 初期状態は閉じる (0 を指定)
+		if (ImGui::TreeNodeEx("Object (Sphere)", 0)) {
+			ImGui::ColorEdit4("Color##Sphere", &materialDataSphere->color.x);
+			ImGui::SliderFloat3("Translate##Sphere", &sphereTransform.translate.x, -10.0f, 10.0f);
+			ImGui::SliderFloat3("Rotate##Sphere", &sphereTransform.rotate.x, -3.14f, 3.14f);
+			ImGui::SliderFloat3("Scale##Sphere", &sphereTransform.scale.x, 0.1f, 10.0f);
+			ImGui::TreePop();
+		}
+
+		// 3. スプライト (Sprite) - 初期状態は閉じる (0 を指定)
+		if (ImGui::TreeNodeEx("Object (Sprite)", 0)) {
+			ImGui::SliderFloat3("Translate##Sprite", &transformSprite.translate.x, -500.0f, 1280.0f);
+			ImGui::SliderFloat3("Rotate##Sprite", &transformSprite.rotate.x, -3.14f, 3.14f);
+			ImGui::SliderFloat3("Scale##Sprite", &transformSprite.scale.x, 1.0f, 1000.0f);
+
+			if (ImGui::TreeNode("UV Transform##Sprite")) {
+				ImGui::SliderFloat2("UV Translate", &uvTransformSprite.translate.x, -10.0f, 10.0f);
+				ImGui::SliderFloat("UV Rotate", &uvTransformSprite.rotate.z, -3.14f, 3.14f);
+				ImGui::SliderFloat2("UV Scale", &uvTransformSprite.scale.x, 0.1f, 10.0f);
+				ImGui::TreePop();
+			}
+			ImGui::TreePop();
+		}
+
+		// モデル (Model) - 初期状態は閉じる (0 を指定)
+		if (ImGui::TreeNodeEx("Object (Model)", 0)) {
+			ImGui::ColorEdit4("Color##Model", &modelMaterialData->color.x);
+			ImGui::SliderFloat3("Translate##Model", &modelTransform.translate.x, -10.0f, 10.0f);
+			ImGui::SliderFloat3("Rotate##Model", &modelTransform.rotate.x, -3.14f, 3.14f);
+			ImGui::SliderFloat3("Scale##Model", &modelTransform.scale.x, 0.1f, 10.0f);
+			ImGui::TreePop();
+		}
+
+		// 4. ライト (Light) - 開いておく (DefaultOpen)
+		if (ImGui::TreeNodeEx("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::ColorEdit4("LightColor", &directionalLightData->color.x);
+			ImGui::SliderFloat3("LightDirection", &directionalLightData->direction.x, -1.0f, 1.0f);
+			ImGui::SliderFloat("Intensity", &directionalLightData->intensity, 0.0f, 10.0f);
+
+			static int currentLightingType = 1;
+
+			const char* lightingItems[] = { "None", "Lambert", "Half Lambert" };
+			if (ImGui::Combo("Lighting Type", &currentLightingType, lightingItems, IM_ARRAYSIZE(lightingItems))) {
+				materialData->lightingType = currentLightingType;
+				materialDataSphere->lightingType = currentLightingType;
+				modelMaterialData->lightingType = currentLightingType;
+			}
+
+			ImGui::TreePop();
+		}
+
+		// 5. サウンドコントロール - 初期状態は閉じる (0 を指定)
+		if (ImGui::TreeNodeEx("Sound Control", 0)) {
+			if (ImGui::Button("Play Fanfare")) {
+				SoundPlayWave(xAudio2.Get(), soundData1);
+			}
+			ImGui::TreePop();
+		}
+
+		ImGui::End();
 #endif
-			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
 
-			D3D12_RESOURCE_BARRIER barrier{};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = swapChainResources[backBufferIndex].Get();
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-			commandList->ResourceBarrier(1, &barrier);
+		Matrix4x4 cameraMatrix = Matrix4x4::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+		Matrix4x4 viewMatrix = Matrix4x4::Inverse(cameraMatrix);
+		Matrix4x4 projectionMatrix = Matrix4x4::MakePerspectiveFovMatrix(0.45f, float(WinApp::kClientWidth) / float(WinApp::kClientHeight), 0.01f, 100.0f);
 
-			D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(WinApp::kClientWidth), static_cast<float>(WinApp::kClientHeight), 0.0f, 1.0f };
-			commandList->RSSetViewports(1, &viewport);
+		// ビュープロジェクション行列の計算 (viewProjectionMatrix の定義)
+		Matrix4x4 viewProjectionMatrix = Matrix4x4::Multiply(viewMatrix, projectionMatrix);
 
-			D3D12_RECT scissorRect{ 0, 0, WinApp::kClientWidth, WinApp::kClientHeight };
-			commandList->RSSetScissorRects(1, &scissorRect);
+		// 平面 (Plane) の行列計算
+		Matrix4x4 worldMatrix = Matrix4x4::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
+		wvpData->WVP = Matrix4x4::Multiply(worldMatrix, viewProjectionMatrix);
+		wvpData->World = worldMatrix;
 
-			float clearColor[] = { 0.2f, 0.6f, 0.9f, 1.0f };
+		// =========================================================
+		// Instancing用の行列計算・データ更新 
+		// =========================================================
+		for (uint32_t index = 0; index < kNumInstance; ++index) {
+			Matrix4x4 worldMat = Matrix4x4::MakeAffineMatrix(particles[index].transform.scale, particles[index].transform.rotate, particles[index].transform.translate);
+			Matrix4x4 worldViewProjectionMatrix = Matrix4x4::Multiply(worldMat, viewProjectionMatrix);
 
-			dsvHandle = dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-			commandList->OMSetRenderTargets(1, &rtvHandles[backBufferIndex], false, &dsvHandle);
+			instancingData[index].WVP = worldViewProjectionMatrix;
+			instancingData[index].World = worldMat;
+		}
 
-			commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
-			commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+		// 球体 (Sphere) の行列計算
+		Matrix4x4 worldMatrixSphere = Matrix4x4::MakeAffineMatrix(sphereTransform.scale, sphereTransform.rotate, sphereTransform.translate);
+		wvpDataSphere->WVP = Matrix4x4::Multiply(worldMatrixSphere, viewProjectionMatrix);
+		wvpDataSphere->World = worldMatrixSphere;
 
-			ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() };
-			commandList->SetDescriptorHeaps(1, descriptorHeaps);
+		Matrix4x4 worldMatrixModel = Matrix4x4::MakeAffineMatrix(modelTransform.scale, modelTransform.rotate, modelTransform.translate);
+		modelWvpData->WVP = Matrix4x4::Multiply(worldMatrixModel, viewProjectionMatrix);
+		modelWvpData->World = worldMatrixModel;
 
-			// =========================================================
-			// Particle (Instancing) の描画 [スライド12]
-			// =========================================================
-			commandList->SetPipelineState(particlePipelineState.Get());
-			commandList->SetGraphicsRootSignature(particleRootSignature.Get());
+		// --- スプライトの行列計算（そのまま残す） ---
+		Matrix4x4 worldMatrixSprite = Matrix4x4::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+		Matrix4x4 viewMatrixSprite = MakeIdentity4x4();
+		Matrix4x4 projectionMatrixSprite = Matrix4x4::MakeOrthographicMatrix(0.0f, 0.0f, float(WinApp::kClientWidth), float(WinApp::kClientHeight), 0.0f, 100.0f);
+		*transformationMatrixDataSprite = Matrix4x4::Multiply(worldMatrixSprite, Matrix4x4::Multiply(viewMatrixSprite, projectionMatrixSprite));
 
-			// ルートパラメータの設定
-			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Material
-			commandList->SetGraphicsRootDescriptorTable(1, instancingSrvHandleGPU);                       // Instancing SRV [スライド12]
-			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);                            // Texture SRV
+		Matrix4x4 uvScaleMat = Matrix4x4::MakeScaleMatrix(uvTransformSprite.scale);
+		Matrix4x4 uvRotMat = Matrix4x4::MakeRotateZMatrix(uvTransformSprite.rotate.z);
+		Matrix4x4 uvTransMat = Matrix4x4::MakeTranslateMatrix(uvTransformSprite.translate);
+		Matrix4x4 uvTransformMatrix = Matrix4x4::Multiply(uvScaleMat, Matrix4x4::Multiply(uvRotMat, uvTransMat));
 
-			// 描画インスタンス数が確保数(kNumInstance)を超えないかチェック
-			assert(kNumInstance <= 10);
+		materialDataSprite->uvTransform = uvTransformMatrix;
 
-			// 平面メッシュの頂点バッファを使って Instancing 描画を発行 
+#ifdef USE_IMGUI
+		ImGui::Render();
+#endif
+		UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
+
+		D3D12_RESOURCE_BARRIER barrier{};
+		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barrier.Transition.pResource = swapChainResources[backBufferIndex].Get();
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		commandList->ResourceBarrier(1, &barrier);
+
+		D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(WinApp::kClientWidth), static_cast<float>(WinApp::kClientHeight), 0.0f, 1.0f };
+		commandList->RSSetViewports(1, &viewport);
+
+		D3D12_RECT scissorRect{ 0, 0, WinApp::kClientWidth, WinApp::kClientHeight };
+		commandList->RSSetScissorRects(1, &scissorRect);
+
+		float clearColor[] = { 0.2f, 0.6f, 0.9f, 1.0f };
+
+		dsvHandle = dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		commandList->OMSetRenderTargets(1, &rtvHandles[backBufferIndex], false, &dsvHandle);
+
+		commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
+		commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+		ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() };
+		commandList->SetDescriptorHeaps(1, descriptorHeaps);
+
+		// =========================================================
+		// Particle (Instancing) の描画 [スライド12]
+		// =========================================================
+		commandList->SetPipelineState(particlePipelineState.Get());
+		commandList->SetGraphicsRootSignature(particleRootSignature.Get());
+
+		// ルートパラメータの設定
+		commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Material
+		commandList->SetGraphicsRootDescriptorTable(1, instancingSrvHandleGPU);                       // Instancing SRV [スライド12]
+		commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);                            // Texture SRV
+
+		// 描画インスタンス数が確保数(kNumInstance)を超えないかチェック
+		assert(kNumInstance <= 10);
+
+		// 平面メッシュの頂点バッファを使って Instancing 描画を発行 
+		commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		commandList->DrawInstanced(UINT(planeVertices.size()), kNumInstance, 0, 0);
+
+		commandList->SetPipelineState(graphicsPipelineState.Get());
+		commandList->SetGraphicsRootSignature(rootSignature.Get());
+
+		// --- 平面 (Plane) の描画 ---
+		if (enablePlaneDraw) {
+			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);
+			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			commandList->DrawInstanced(UINT(planeVertices.size()), kNumInstance, 0, 0);
+			commandList->DrawInstanced(UINT(planeVertices.size()), 1, 0, 0);
+		}
 
-			commandList->SetPipelineState(graphicsPipelineState.Get());
-			commandList->SetGraphicsRootSignature(rootSignature.Get());
+		// --- 球体 (Sphere) の描画 ---
+		if (enableSphereDraw) {
+			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSphere->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(1, wvpResourceSphere->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);
+			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
 
-			// --- 平面 (Plane) の描画 ---
-			if (enablePlaneDraw) {
-				commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);
-				commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);
+			commandList->IASetIndexBuffer(&indexBufferViewSphere);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			commandList->DrawIndexedInstanced(kIndexCountSphere, 1, 0, 0, 0);
+		}
 
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+		if (enableModelDraw) {
+			// フェンス描画前に非加算合成（通常アルファ）用 PSO をセット
+			commandList->SetPipelineState(graphicsPipelineStateFence.Get());
+
+			commandList->SetGraphicsRootConstantBufferView(0, modelMaterialResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(1, modelWvpResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPUFence);
+			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+
+			for (size_t i = 0; i < modelResource.meshes.size(); ++i) {
+				commandList->IASetVertexBuffers(0, 1, &modelResource.meshes[i].vertexBufferView);
 				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				commandList->DrawInstanced(UINT(planeVertices.size()), 1, 0, 0);
+				commandList->DrawInstanced(UINT(modelData.meshes[i].vertices.size()), 1, 0, 0);
 			}
+		}
 
-			// --- 球体 (Sphere) の描画 ---
-			if (enableSphereDraw) {
-				commandList->SetGraphicsRootConstantBufferView(0, materialResourceSphere->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootConstantBufferView(1, wvpResourceSphere->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPU);
-				commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+		// --- スプライト (Sprite) の描画 ---
+		if (enableSpriteDraw) {
+			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPUSprite);
 
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);
-				commandList->IASetIndexBuffer(&indexBufferViewSphere);
-				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				commandList->DrawIndexedInstanced(kIndexCountSphere, 1, 0, 0, 0);
-			}
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+			commandList->IASetIndexBuffer(&indexBufferViewSprite);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-			if (enableModelDraw) {
-				// フェンス描画前に非加算合成（通常アルファ）用 PSO をセット
-				commandList->SetPipelineState(graphicsPipelineStateFence.Get());
-
-				commandList->SetGraphicsRootConstantBufferView(0, modelMaterialResource->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootConstantBufferView(1, modelWvpResource->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPUFence);
-				commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
-
-				for (size_t i = 0; i < modelResource.meshes.size(); ++i) {
-					commandList->IASetVertexBuffers(0, 1, &modelResource.meshes[i].vertexBufferView);
-					commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-					commandList->DrawInstanced(UINT(modelData.meshes[i].vertices.size()), 1, 0, 0);
-				}
-			}
-
-			// --- スプライト (Sprite) の描画 ---
-			if (enableSpriteDraw) {
-				commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
-				commandList->SetGraphicsRootDescriptorTable(2, srvHandleGPUSprite);
-
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-				commandList->IASetIndexBuffer(&indexBufferViewSprite);
-				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-				commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-			}
+			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+		}
 
 #ifdef USE_IMGUI
-			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
 #endif
 
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-			commandList->ResourceBarrier(1, &barrier);
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+		commandList->ResourceBarrier(1, &barrier);
 
-			hr = commandList->Close();
+		hr = commandList->Close();
+		assert(SUCCEEDED(hr));
+
+		// アスタリスク '*' を追加
+		ID3D12CommandList* commandLists[] = { commandList.Get() };
+		commandQueue->ExecuteCommandLists(1, commandLists);
+
+		swapChain->Present(1, 0);
+
+		fenceValue++;
+		hr = commandQueue->Signal(fence.Get(), fenceValue);
+		assert(SUCCEEDED(hr));
+
+		if (fence->GetCompletedValue() < fenceValue) {
+			hr = fence->SetEventOnCompletion(fenceValue, fenceEvent);
 			assert(SUCCEEDED(hr));
-
-			// アスタリスク '*' を追加
-			ID3D12CommandList* commandLists[] = { commandList.Get() };
-			commandQueue->ExecuteCommandLists(1, commandLists);
-
-			swapChain->Present(1, 0);
-
-			fenceValue++;
-			hr = commandQueue->Signal(fence.Get(), fenceValue);
-			assert(SUCCEEDED(hr));
-
-			if (fence->GetCompletedValue() < fenceValue) {
-				hr = fence->SetEventOnCompletion(fenceValue, fenceEvent);
-				assert(SUCCEEDED(hr));
-				WaitForSingleObject(fenceEvent, INFINITE);
-			}
-
-			commandAllocator->Reset();
-			commandList->Reset(commandAllocator.Get(), nullptr);
+			WaitForSingleObject(fenceEvent, INFINITE);
 		}
+
+		commandAllocator->Reset();
+		commandList->Reset(commandAllocator.Get(), nullptr);
 	}
+
 
 	// ========================
 	// 解放処理
@@ -2205,9 +2206,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// 2. その後に音声データのメモリを安全に解放
 	SoundUnload(&soundData1);
 
-	delete input;
-	delete winApp;
-
 #ifdef USE_IMGUI
 	ImGui_ImplDX12_Shutdown();
 	ImGui_ImplWin32_Shutdown();
@@ -2218,6 +2216,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	if (fenceEvent) {
 		CloseHandle(fenceEvent);
 	}
+
+	// WindowsAPIの終了処理
+	winApp->Finalize();
+
+	delete input;
+	delete winApp;
 
 	return 0;
 }

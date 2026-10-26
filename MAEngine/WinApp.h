@@ -17,6 +17,11 @@ public:
 	// 更新
 	void Update();
 
+	// 終了
+	void Finalize();
+
+	bool ProcessMessage();
+
 	// getter
 	HWND GetHwnd() const { return hwnd_; }
 	HINSTANCE GetHInstance() const { return wc_.hInstance; }

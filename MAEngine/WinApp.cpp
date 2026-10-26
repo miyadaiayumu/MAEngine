@@ -1,12 +1,10 @@
 #include "WinApp.h"
-
+#include <cassert>
 #ifdef USE_IMGUI
 #include "externals/imgui/imgui.h"
 #include "externals/imgui/imgui_impl_win32.h"
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #endif
-
-#pragma comment(lib, "winmm.lib") // 必要なら
 
 LRESULT CALLBACK WinApp::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -26,6 +24,9 @@ LRESULT CALLBACK WinApp::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
 void WinApp::Initialize()
 {
+	HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+	assert(SUCCEEDED(hr));
+
 	// ウィンドウクラス
 	wc_.lpfnWndProc = WindowProc;
 	wc_.lpszClassName = L"CG2WindowClass";
@@ -55,3 +56,25 @@ void WinApp::Initialize()
 
 void WinApp::Update()
 {}
+
+void WinApp::Finalize()
+{
+	// ウィンドウを閉じる
+	CloseWindow(hwnd_);
+
+	// COMの終了
+	CoUninitialize();
+}
+
+bool WinApp::ProcessMessage()
+{
+	MSG msg{};
+	if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+	if (msg.message == WM_QUIT) {
+		return true;
+	}
+	return false;
+}

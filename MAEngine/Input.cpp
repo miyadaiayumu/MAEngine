@@ -4,36 +4,28 @@
 #pragma comment(lib, "dinput8.lib")
 #pragma comment(lib, "dxguid.lib")
 
-void Input::Initialize(HINSTANCE hInstance, HWND hwnd)
-{
+void Input::Initialize(WinApp* winApp){
+
+	this->winApp_ = winApp;
+
 
 	HRESULT hr;
 
-    // 1. DirectInputオブジェクトの生成
-    hr = DirectInput8Create(
-        hInstance,
-        DIRECTINPUT_VERSION,
-        IID_IDirectInput8,
-        reinterpret_cast<void**>(directInput.GetAddressOf()),
-        nullptr
-    );
+	// 1. DirectInputオブジェクトの生成
+	hr = DirectInput8Create(winApp->GetHInstance(),DIRECTINPUT_VERSION,IID_IDirectInput8,reinterpret_cast<void**>(directInput.GetAddressOf()),nullptr);
+	assert(SUCCEEDED(hr));
 
-    assert(SUCCEEDED(hr));
+	// 2. キーボードデバイスの生成
+	hr = directInput->CreateDevice(GUID_SysKeyboard, keyboard.GetAddressOf(), nullptr);
+	assert(SUCCEEDED(hr));
 
-    // 2. キーボードデバイスの生成
-    hr = directInput->CreateDevice(GUID_SysKeyboard, keyboard.GetAddressOf(), nullptr);
-    assert(SUCCEEDED(hr));
+	// 3. 入力データ形式のセット
+	hr = keyboard->SetDataFormat(&c_dfDIKeyboard);
+	assert(SUCCEEDED(hr));
 
-    // 3. 入力データ形式のセット
-    hr = keyboard->SetDataFormat(&c_dfDIKeyboard);
-    assert(SUCCEEDED(hr));
-
-    // 4. 排他制御レベルのセット
-    hr = keyboard->SetCooperativeLevel(
-        hwnd,
-        DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY
-    );
-    assert(SUCCEEDED(hr));
+	// 4. 排他制御レベルのセット
+	hr = keyboard->SetCooperativeLevel(winApp->GetHwnd(),DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY);
+	assert(SUCCEEDED(hr));
 }
 
 void Input::Update()
