@@ -16,12 +16,14 @@
 #include<dxgidebug.h>
 #include<dxcapi.h>
 #include <wrl.h>
+#include <memory>
 #include<xaudio2.h>
 #include <vector>
 #include<random> 
 #include"Matrix4x4.h"
 #include"Vector3.h"
 #include"Input.h"
+#include"DebugCamera.h"
 #include"WinApp.h"
 #include"DirectXCommon.h"
 #include"Logger.h"
@@ -537,15 +539,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	HRESULT hr;
 
 	// ポインタ
-	Input* input = nullptr;
-	WinApp* winApp = nullptr;
-	DirectXCommon* dxCommon = nullptr;
-
-	// まずリークチェッカーを宣言する
+	// まずリークチェッカーを宣言する（unique_ptr より先に宣言 = 最後に破棄される）
 	D3DResourceLeakChecker leakCheck;
 
+	// 所有権は unique_ptr が持つ。宣言の逆順（input → dxCommon → winApp）で自動破棄される
+	std::unique_ptr<WinApp> winApp;
+	std::unique_ptr<DirectXCommon> dxCommon;
+	std::unique_ptr<Input> input;
 
-	winApp = new WinApp();
+
+	winApp = std::make_unique<WinApp>();
 	winApp->Initialize();
 
 	SetUnhandledExceptionFilter(ExportDump);
@@ -560,8 +563,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	// DirectX基盤の初期化
 	// ========================
-	dxCommon = new DirectXCommon();
-	dxCommon->Initialize(winApp);
+	dxCommon = std::make_unique<DirectXCommon>();
+	dxCommon->Initialize(winApp.get());
 
 	// 以降のコードで使う生ポインタ（ComPtrの所有権はDirectXCommonが持つ）
 	ID3D12Device* device = dxCommon->GetDevice();
@@ -1389,13 +1392,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 
 	// // 入力の初期化
-	input = new Input();
-	input->Initialize(winApp);
+	input = std::make_unique<Input>();
+	input->Initialize(winApp.get());
 
 	// ========================
 	// 音声読み込み
 	// ========================
 	SoundData soundData1 = SoundLoadWave("resources/fanfare.wav");
+
+	// デバッグカメラ（Tabキー / ImGui で通常カメラと切り替え）
+	DebugCamera debugCamera;
+	debugCamera.Initialize();
+	bool useDebugCamera = false;
 
 	while (true) {   // ゲームループ
 
@@ -1410,6 +1418,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// --------------------------------------------------
 		input->Update(); // 入力の更新
 
+		// Tabキーでデバッグカメラの ON/OFF 切り替え
+		if (input->TriggerKey(DIK_TAB)) {
+			useDebugCamera = !useDebugCamera;
+		}
+
 		// 0キーが押された瞬間（トリガー）に「Hit 0」を出力する
 		if (input->TriggerKey(DIK_0)) {
 			OutputDebugStringA("Hit 0\n");
@@ -1421,6 +1434,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		ImGui::NewFrame();
 
 		ImGui::Begin("Settings");
+
+		ImGui::Checkbox("Use Debug Camera (Tab)", &useDebugCamera);
 
 		// 開いておくノード（DefaultOpen）
 		if (ImGui::TreeNodeEx("Rendering Switch", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1502,9 +1517,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		ImGui::End();
 #endif
 
-		Matrix4x4 cameraMatrix = Matrix4x4::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
-		Matrix4x4 viewMatrix = Matrix4x4::Inverse(cameraMatrix);
-		Matrix4x4 projectionMatrix = Matrix4x4::MakePerspectiveFovMatrix(0.45f, float(WinApp::kClientWidth) / float(WinApp::kClientHeight), 0.01f, 100.0f);
+		Matrix4x4 viewMatrix;
+		Matrix4x4 projectionMatrix;
+		if (useDebugCamera) {
+			// デバッグカメラ: 入力を渡してビュー行列・射影行列を取得する
+			debugCamera.Update(input->GetKeys());
+			viewMatrix = debugCamera.GetViewMatrix();
+			projectionMatrix = debugCamera.GetProjectionMatrix();
+		} else {
+			Matrix4x4 cameraMatrix = Matrix4x4::MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+			viewMatrix = Matrix4x4::Inverse(cameraMatrix);
+			projectionMatrix = Matrix4x4::MakePerspectiveFovMatrix(0.45f, float(WinApp::kClientWidth) / float(WinApp::kClientHeight), 0.01f, 100.0f);
+		}
 
 		// ビュープロジェクション行列の計算 (viewProjectionMatrix の定義)
 		Matrix4x4 viewProjectionMatrix = Matrix4x4::Multiply(viewMatrix, projectionMatrix);
@@ -1654,14 +1678,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	ImGui::DestroyContext();
 #endif
 
+	// 破棄順を明示する（Input → DirectXCommon → WinApp）
+	input.reset();
+
 	// DirectX基盤の解放（ComPtrのメンバは自動でReleaseされる）
-	delete dxCommon;
+	dxCommon.reset();
 
 	// WindowsAPIの終了処理
 	winApp->Finalize();
-
-	delete input;
-	delete winApp;
+	winApp.reset();
 
 	Logger::Finalize();
 

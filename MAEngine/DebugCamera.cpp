@@ -1,10 +1,12 @@
 #include "DebugCamera.h"
 #include "Matrix4x4.h"
+#include "WinApp.h"
+#define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h> // DIK_W 等の定数を使用するため
 #include <cstdint>
 
 // ベクトル変換関数
-Vector3 Transform(const Vector3& vector, const Matrix4x4& matrix) {
+static Vector3 TransformNormal(const Vector3& vector, const Matrix4x4& matrix) {
     Vector3 result;
     // ベクトルに回転行列を適用 (w = 0 として方向ベクトルとして扱う)
     result.x = vector.x * matrix.m[0][0] + vector.y * matrix.m[1][0] + vector.z * matrix.m[2][0];
@@ -14,7 +16,7 @@ Vector3 Transform(const Vector3& vector, const Matrix4x4& matrix) {
 }
 
 // WinMain側に定義されている判定用のヘルパー関数
-bool IsPressKey(const BYTE* keys, uint8_t keyNumber) {
+static bool IsPressKey(const BYTE* keys, uint8_t keyNumber) {
     return (keys[keyNumber] & 0x80) != 0;
 }
 
@@ -22,6 +24,14 @@ void DebugCamera::Initialize()
 {
     // 【修正】MakeIdentityMatrix() から MakeIdentity4x4() に変更
     matRot_ = Matrix4x4::MakeIdentity4x4();
+
+    // 射影行列（画面サイズは WinApp の定数から算出）
+    projectionMatrix_ = Matrix4x4::MakePerspectiveFovMatrix(
+        0.45f, float(WinApp::kClientWidth) / float(WinApp::kClientHeight), 0.01f, 1000.0f);
+
+    // Update 前に GetViewMatrix() されても安全なように初期値を作っておく
+    viewMatrix_ = Matrix4x4::Inverse(
+        Matrix4x4::Multiply(matRot_, Matrix4x4::MakeTranslateMatrix(translation_)));
 }
 
 void DebugCamera::Update(const BYTE* keys)
@@ -97,7 +107,7 @@ void DebugCamera::Update(const BYTE* keys)
 
     // --- 【移動ベクトルの回転と座標への加算】 ---
     // 更新した累積回転行列「matRot_」を使用して移動ベクトルを回転させます
-    Vector3 rotatedMove = Transform(totalMove, matRot_);
+    Vector3 rotatedMove = TransformNormal(totalMove, matRot_);
 
     // カメラの座標に加算する
     translation_.x += rotatedMove.x;

@@ -18,6 +18,9 @@ public:
 
 	bool TriggerKey(BYTE keyNumber);
 
+	// 現在のキー状態配列（256要素）。DebugCamera などに渡す用
+	const BYTE* GetKeys() const { return key; }
+
 private:
 	Microsoft::WRL::ComPtr<IDirectInputDevice8> keyboard;
 	Microsoft::WRL::ComPtr<IDirectInput8> directInput;

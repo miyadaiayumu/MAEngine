@@ -7,7 +7,9 @@
 #include <format>
 #include <thread>
 #include <vector>
+#include <timeapi.h>
 
+#pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
@@ -17,6 +19,10 @@ using Microsoft::WRL::ComPtr;
 namespace {
 	// 固定したいFPS
 	constexpr double kTargetFPS = 60.0;
+
+	// true : Present(1,0) の垂直同期だけでフレームを制御（UpdateFixFPS は使わない）
+	// false: Present(0,0) + UpdateFixFPS で自前に 60FPS 固定（timeBeginPeriod(1) で待機精度を上げる）
+	constexpr bool kUseVSync = true;
 }
 
 DirectXCommon::~DirectXCommon()
@@ -28,6 +34,9 @@ DirectXCommon::~DirectXCommon()
 	if (fenceEvent_) {
 		CloseHandle(fenceEvent_);
 		fenceEvent_ = nullptr;
+	}
+	if (!kUseVSync) {
+		timeEndPeriod(1); // InitializeFixFPS の timeBeginPeriod(1) と対
 	}
 	// ComPtr のメンバは自動で Release される（手動の Release は不要）
 }
@@ -289,13 +298,16 @@ void DirectXCommon::PostDraw()
 	ID3D12CommandList* commandLists[] = { commandList_.Get() };
 	commandQueue_->ExecuteCommandLists(1, commandLists);
 
-	swapChain_->Present(1, 0);
+	// VSync使用時は 1、自前FPS固定時は 0（二重待ちを避ける）
+	swapChain_->Present(kUseVSync ? 1 : 0, 0);
 
 	// GPUの処理完了を待つ
 	WaitForGpu();
 
-	// FPSを固定する
-	UpdateFixFPS();
+	// FPSを固定する（VSync に任せる場合は不要）
+	if (!kUseVSync) {
+		UpdateFixFPS();
+	}
 
 	// 次フレームの準備
 	hr = commandAllocator_->Reset();
@@ -322,6 +334,10 @@ void DirectXCommon::WaitForGpu()
 // ======================================================
 void DirectXCommon::InitializeFixFPS()
 {
+	if (!kUseVSync) {
+		// Windows のタイマー分解能を 1ms に上げる（既定は約15.6ms）。終了時に timeEndPeriod(1)
+		timeBeginPeriod(1);
+	}
 	reference_ = std::chrono::steady_clock::now();
 }
 
@@ -338,9 +354,17 @@ void DirectXCommon::UpdateFixFPS()
 	microseconds elapsed = duration_cast<microseconds>(now - reference_);
 
 	if (elapsed < kMinCheckTime) {
-		// 1/60秒経過するまで微小スリープを繰り返す
-		while (steady_clock::now() - reference_ < kMinTime) {
-			std::this_thread::sleep_for(microseconds(1));
+		// 残り時間が長い間は 1ms スリープ（CPU負荷を抑える）、最後の約2msはスピンで精密に待つ
+		while (true) {
+			microseconds remain = kMinTime - duration_cast<microseconds>(steady_clock::now() - reference_);
+			if (remain <= microseconds(0)) {
+				break;
+			}
+			if (remain > microseconds(2000)) {
+				std::this_thread::sleep_for(milliseconds(1));
+			} else {
+				std::this_thread::yield();
+			}
 		}
 	}
 	// 現在の時間を記録する
