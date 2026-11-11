@@ -58,10 +58,10 @@ void DebugCamera::Update(const BYTE* keys)
 
     // 左右移動 (D / A キー)
     if (IsPressKey(keys, DIK_D)) {
-        totalMove.x += moveSpeed; // 右移動
+        totalMove.x -= moveSpeed; // D: 画面上で物体が右へ流れる向き
     }
     if (IsPressKey(keys, DIK_A)) {
-        totalMove.x -= moveSpeed; // 左移動
+        totalMove.x += moveSpeed; // A: 画面上で物体が左へ流れる向き
     }
 
     // 上下移動 (Space / LSHIFT キー)
@@ -87,10 +87,10 @@ void DebugCamera::Update(const BYTE* keys)
 
     // Y軸周りの回転（左右のヨー：矢印キー 右 / 左）
     if (IsPressKey(keys, DIK_RIGHT)) {
-        deltaY += rotateSpeed;
+        deltaY -= rotateSpeed;
     }
     if (IsPressKey(keys, DIK_LEFT)) {
-        deltaY -= rotateSpeed;
+        deltaY += rotateSpeed;
     }
 
     // 【修正】追加回転分の回転行列を生成 (MakeIdentity4x4 に変更)
