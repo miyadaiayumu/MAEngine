@@ -19,6 +19,7 @@
 #include <memory>
 #include<xaudio2.h>
 #include <vector>
+#include <cmath>
 #include<random> 
 #include"Matrix4x4.h"
 #include"Vector3.h"
@@ -62,7 +63,7 @@ struct Particle {
 //Tranceform変数を作る
 Transform transform{ { 1.0f,1.0f,1.0f },{ 0.0f,0.0f,0.0f, },{ 0.0f,0.0f,0.0f, } };
 
-Transform cameraTransform{ { 1.0f,1.0f,1.0f },{ 0.0f,0.0f,0.0f, },{ 0.0f,0.0f,-3.0f, } };
+Transform cameraTransform{ { 1.0f,1.0f,1.0f },{ 0.0f,0.0f,0.0f, },{ 0.0f,0.0f,-30.0f, } }; // ビームが見えるよう引いた位置
 
 IDxcBlob* CompileShader(
 	const std::wstring& filePath,
@@ -192,10 +193,11 @@ LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception)
 }
 
 // 描画切り替えフラグ
-bool enablePlaneDraw = true;   // 平面
-bool enableModelDraw = true;  // モデル
+bool enablePlaneDraw = false;   // 平面
+bool enableModelDraw = false;  // モデル
 bool enableSphereDraw = false; // 球体
 bool enableSpriteDraw = false; // スプライト
+bool enableParticleDraw = false; // 旧パーティクル(uvChecker板ポリ10枚)
 
 struct Vector4 {
 	float x;
@@ -221,6 +223,96 @@ struct TransformationMatrix {
 	Matrix4x4 WVP;
 	Matrix4x4 World;
 };
+
+// ================================================================
+// エフェクト(マスタースパーク風ビーム + 着弾火花)用
+// 既存の Particle シェーダー / RootSignature をそのまま使う
+// ================================================================
+struct FxMaterial {
+	Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+	Material* data = nullptr;
+};
+
+// 着弾で飛び散る火花1粒
+struct Spark {
+	Vector3 pos;
+	Vector3 vel;
+	float life;
+	float maxLife;
+	float size;
+};
+
+constexpr uint32_t kMaxSparks = 128;
+constexpr float kBeamOpenTime = 0.25f;  // 開く
+constexpr float kBeamHoldTime = 3.0f;   // 照射
+constexpr float kBeamCloseTime = 0.5f;  // 閉じる
+
+// ビーム軸を固定してカメラ側へ面を向ける(円柱ビルボード)
+// 板ポリは縦(Y)=ビームの長さ、横(X)=幅として使う
+Matrix4x4 MakeBeamMatrix(const Vector3& start, const Vector3& dir,
+	float length, float width, const Vector3& camPos) {
+	Vector3 center = start.Add(dir.Multiply(length * 0.5f));
+	Vector3 toCam = camPos.Subtract(center);
+
+	Vector3 right = Vector3::Cross(dir, toCam);
+	if (right.Length() < 0.001f) { // ビームがカメラと真正面だと潰れるので保険
+		right = Vector3::Cross(dir, Vector3(1.0f, 0.0f, 0.0f));
+	}
+	right = right.Normalize();
+	Vector3 front = Vector3::Cross(right, dir).Normalize();
+
+	Vector3 x = right.Multiply(width);
+	Vector3 y = dir.Multiply(length);
+
+	Matrix4x4 m = Matrix4x4::MakeIdentity4x4();
+	m.m[0][0] = x.x;      m.m[0][1] = x.y;      m.m[0][2] = x.z;
+	m.m[1][0] = y.x;      m.m[1][1] = y.y;      m.m[1][2] = y.z;
+	m.m[2][0] = front.x;  m.m[2][1] = front.y;  m.m[2][2] = front.z;
+	m.m[3][0] = center.x; m.m[3][1] = center.y; m.m[3][2] = center.z;
+	return m;
+}
+
+// 常にカメラの方を向く板ポリ(火花・発射口・着弾フラッシュ用)
+Matrix4x4 MakeBillboardMatrix(const Vector3& pos, float size, const Matrix4x4& cameraWorld, float sizeY = -1.0f) {
+	if (sizeY < 0.0f) { sizeY = size; } // 省略時は正方形。縦だけ伸ばしたいときに sizeY を指定
+	Matrix4x4 m = Matrix4x4::MakeIdentity4x4();
+	for (int j = 0; j < 3; ++j) {
+		m.m[0][j] = cameraWorld.m[0][j] * size; // カメラの右
+		m.m[1][j] = cameraWorld.m[1][j] * sizeY; // カメラの上
+		m.m[2][j] = cameraWorld.m[2][j];        // カメラの前
+	}
+	m.m[3][0] = pos.x;
+	m.m[3][1] = pos.y;
+	m.m[3][2] = pos.z;
+	return m;
+}
+
+// 素早く開く → 保持 → 閉じる
+float BeamEnvelope(float t) {
+	if (t < 0.0f) return 0.0f;
+	if (t < kBeamOpenTime) {
+		float x = t / kBeamOpenTime;
+		return 1.0f - (1.0f - x) * (1.0f - x);
+	}
+	if (t < kBeamOpenTime + kBeamHoldTime) return 1.0f;
+	float c = t - kBeamOpenTime - kBeamHoldTime;
+	if (c < kBeamCloseTime) return 1.0f - c / kBeamCloseTime;
+	return 0.0f;
+}
+
+// ================================================================
+// 炎エフェクト用
+// ================================================================
+struct FlameParticle {
+	Vector3 pos;
+	Vector3 vel;
+	float life;
+	float maxLife;
+	float size;
+	float seed; // ゆらぎの位相ずらし用
+};
+
+constexpr uint32_t kMaxFlame = 256;
 
 struct DirectionalLight {
 	Vector4 color;
@@ -979,6 +1071,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	);
 	assert(SUCCEEDED(hr));
 
+	// ================================================
+	// エフェクト用 PSO: Particleと同じシェーダー・RootSignatureで、加算合成・カリングなしだけ変える
+	// ================================================
+	D3D12_BLEND_DESC fxBlendDesc = particleBlendDesc;
+	fxBlendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE; // 加算合成
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC fxPipelineStateDesc = particlePipelineStateDesc;
+	fxPipelineStateDesc.BlendState = fxBlendDesc;
+	fxPipelineStateDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> fxPipelineState;
+	hr = device->CreateGraphicsPipelineState(
+		&fxPipelineStateDesc,
+		IID_PPV_ARGS(&fxPipelineState)
+	);
+	assert(SUCCEEDED(hr));
+
 	const uint32_t kSubdivision = 16;
 	const uint32_t kVertexCountSphere = kSubdivision * kSubdivision * 6;
 	std::vector<VertexData> sphereVertices(kVertexCountSphere);
@@ -1390,6 +1499,172 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	device->CreateShaderResourceView(instancingResource.Get(), &instancingSrvDesc, instancingSrvHandleCPU);
 
+	// =========================================================
+	// エフェクト(ビーム・火花)用のテクスチャ / Material / Instancing
+	// SRVヒープ: 0=ImGui, 1~4=既存, 5~7=FXテクスチャ, 8~12=FXインスタンスSRV
+	// =========================================================
+	std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> fxKeepAlive; // 転送が終わるまでテクスチャと中間リソースを保持
+
+	auto createFxTexture = [&](DirectX::ScratchImage mip, uint32_t heapIndex) {
+		Microsoft::WRL::ComPtr<ID3D12Resource> tex = dxCommon->CreateTextureResource(mip.GetMetadata());
+		Microsoft::WRL::ComPtr<ID3D12Resource> inter = dxCommon->UploadTextureData(tex.Get(), mip);
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+		desc.Format = mip.GetMetadata().format;
+		desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		desc.Texture2D.MipLevels = static_cast<UINT>(mip.GetMetadata().mipLevels);
+		device->CreateShaderResourceView(tex.Get(), &desc,
+			DirectXCommon::GetCPUDescriptorHandle(srvDescriptorHeap, descriptorSizeSRV, heapIndex));
+
+		fxKeepAlive.push_back(tex);
+		fxKeepAlive.push_back(inter);
+		return DirectXCommon::GetGPUDescriptorHandle(srvDescriptorHeap, descriptorSizeSRV, heapIndex);
+	};
+
+	D3D12_GPU_DESCRIPTOR_HANDLE texEdgeGPU = createFxTexture(LoadTexture("resources/beam_edge.png"), 5);
+	D3D12_GPU_DESCRIPTOR_HANDLE texWhiteGPU = createFxTexture(LoadTexture("resources/white.png"), 6);
+	D3D12_GPU_DESCRIPTOR_HANDLE texSparkGPU = createFxTexture(LoadTexture("resources/spark.png"), 7);
+
+	auto createFxMaterial = [&](const Vector4& color) {
+		FxMaterial fx;
+		fx.resource = dxCommon->CreateBufferResource((sizeof(Material) + 0xff) & ~0xff);
+		fx.resource->Map(0, nullptr, reinterpret_cast<void**>(&fx.data));
+		fx.data->color = color;
+		fx.data->enableLighting = 0;
+		fx.data->lightingType = 0;
+		fx.data->padding[0] = 0.0f;
+		fx.data->padding[1] = 0.0f;
+		fx.data->uvTransform = MakeIdentity4x4();
+		return fx;
+	};
+
+	FxMaterial matBeamOuter = createFxMaterial({ 0.2f, 0.5f, 1.0f, 1.0f });  // 縁の帯(色はImGuiで変更)
+	FxMaterial matBeamMid = createFxMaterial({ 0.6f, 0.85f, 1.0f, 1.0f });   // 中間のグロー(色はImGuiで変更)
+	FxMaterial matBeamCore = createFxMaterial({ 1.0f, 1.0f, 1.0f, 1.0f });   // 芯(色はImGuiで変更)
+	FxMaterial matOrb = createFxMaterial({ 1.0f, 0.95f, 0.7f, 1.0f });       // 発射口・着弾の光球
+	FxMaterial matSpark = createFxMaterial({ 1.0f, 0.7f, 0.25f, 1.0f });     // 火花
+
+	// インスタンスバッファは1本にまとめて、描画ごとに別のSRV(範囲違い)を使う
+	// [0]縁の帯 [1~12]グロー(幅違いを重ねる) [13]芯 [14~15]光球(発射口/着弾) [16~]火花
+	constexpr uint32_t kBeamGlowLayers = 12;
+	constexpr uint32_t kFxGlowOffset = 1;
+	constexpr uint32_t kFxCoreOffset = kFxGlowOffset + kBeamGlowLayers;
+	constexpr uint32_t kFxOrbOffset = kFxCoreOffset + 1;
+	constexpr uint32_t kFxSparkOffset = kFxOrbOffset + 2;
+	constexpr uint32_t kFxInstanceCount = kFxSparkOffset + kMaxSparks;
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> fxInstancingResource =
+		dxCommon->CreateBufferResource(sizeof(TransformationMatrix) * kFxInstanceCount);
+	TransformationMatrix* fxData = nullptr;
+	fxInstancingResource->Map(0, nullptr, reinterpret_cast<void**>(&fxData));
+	for (uint32_t i = 0; i < kFxInstanceCount; ++i) {
+		fxData[i].WVP = MakeIdentity4x4();
+		fxData[i].World = MakeIdentity4x4();
+	}
+
+	auto createFxInstanceSrv = [&](uint32_t firstElement, uint32_t numElements, uint32_t heapIndex) {
+		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+		desc.Format = DXGI_FORMAT_UNKNOWN;
+		desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+		desc.Buffer.FirstElement = firstElement;
+		desc.Buffer.NumElements = numElements;
+		desc.Buffer.StructureByteStride = sizeof(TransformationMatrix);
+		desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		device->CreateShaderResourceView(fxInstancingResource.Get(), &desc,
+			DirectXCommon::GetCPUDescriptorHandle(srvDescriptorHeap, descriptorSizeSRV, heapIndex));
+		return DirectXCommon::GetGPUDescriptorHandle(srvDescriptorHeap, descriptorSizeSRV, heapIndex);
+	};
+
+	D3D12_GPU_DESCRIPTOR_HANDLE srvBeamOuterGPU = createFxInstanceSrv(0, 1, 8);
+	D3D12_GPU_DESCRIPTOR_HANDLE srvBeamMidGPU = createFxInstanceSrv(kFxGlowOffset, kBeamGlowLayers, 9);
+	D3D12_GPU_DESCRIPTOR_HANDLE srvBeamCoreGPU = createFxInstanceSrv(kFxCoreOffset, 1, 10);
+	D3D12_GPU_DESCRIPTOR_HANDLE srvOrbGPU = createFxInstanceSrv(kFxOrbOffset, 2, 11);
+	D3D12_GPU_DESCRIPTOR_HANDLE srvSparkGPU = createFxInstanceSrv(kFxSparkOffset, kMaxSparks, 12);
+
+	// ビームの状態とパラメータ
+	bool beamActive = false;
+	float beamT = 0.0f;
+	// 画面の右下手前(カメラz=-30から見て手前側)から、奥の着弾点へ撃つ → 遠近で3Dに見える
+	Vector3 beamStart = { 6.0f, -5.0f, -10.0f };
+	Vector3 beamTarget = { -1.0f, 2.0f, 55.0f }; // 着弾点(火花もここで出る)
+	float beamWidth = 3.0f;
+	// 色(ImGuiで変更。炎と同じ)
+	float beamColorOuter[3] = { 0.2f, 0.5f, 1.0f };   // 縁の帯
+	float beamColorMid[3] = { 0.6f, 0.85f, 1.0f };    // 中間のグロー
+	float beamColorCore[3] = { 1.0f, 1.0f, 1.0f };    // 芯
+	float beamIntensity = 1.0f;                       // 全体の明るさ
+	float beamClock = 0.0f;     // 揺れ・脈動用の時間(長押し中も進み続ける)
+	bool beamHold = false;      // ONにすると撃ち続ける(Zを押した後、離しても続く)
+
+	// 着弾火花のパラメータ
+	std::vector<Spark> sparks;
+	sparks.reserve(kMaxSparks);
+	std::mt19937 fxRandom(std::random_device{}());
+	auto randRange = [&](float minV, float maxV) {
+		return std::uniform_real_distribution<float>(minV, maxV)(fxRandom);
+	};
+	float sparkAccum = 0.0f;
+	float sparkRate = 200.0f;   // 毎秒の発生数
+	float sparkSpeed = 14.0f;
+	float sparkSize = 0.8f;
+	float sparkGravity = -10.0f;
+
+	// =========================================================
+	// 炎: 光の粒を下から出して、上に昇らせながら縮める(粒は3層重ねて色を分ける)
+	// SRVヒープ: 13=炎テクスチャ, 14~16=炎インスタンス(外側/中間/芯)
+	// =========================================================
+	D3D12_GPU_DESCRIPTOR_HANDLE texFlameGPU = createFxTexture(LoadTexture("resources/flame.png"), 13);
+
+	FxMaterial matFlameOuter = createFxMaterial({ 1.0f, 0.25f, 0.05f, 0.25f });
+	FxMaterial matFlameMid = createFxMaterial({ 1.0f, 0.55f, 0.10f, 0.35f });
+	FxMaterial matFlameCore = createFxMaterial({ 1.0f, 0.90f, 0.50f, 0.50f });
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> flameInstancingResource =
+		dxCommon->CreateBufferResource(sizeof(TransformationMatrix) * kMaxFlame * 3);
+	TransformationMatrix* flameData = nullptr;
+	flameInstancingResource->Map(0, nullptr, reinterpret_cast<void**>(&flameData));
+	for (uint32_t i = 0; i < kMaxFlame * 3; ++i) {
+		flameData[i].WVP = MakeIdentity4x4();
+		flameData[i].World = MakeIdentity4x4();
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE srvFlameGPU[3];
+	for (uint32_t l = 0; l < 3; ++l) {
+		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+		desc.Format = DXGI_FORMAT_UNKNOWN;
+		desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+		desc.Buffer.FirstElement = l * kMaxFlame; // 層ごとに別の範囲を見る
+		desc.Buffer.NumElements = kMaxFlame;
+		desc.Buffer.StructureByteStride = sizeof(TransformationMatrix);
+		desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		device->CreateShaderResourceView(flameInstancingResource.Get(), &desc,
+			DirectXCommon::GetCPUDescriptorHandle(srvDescriptorHeap, descriptorSizeSRV, 14 + l));
+		srvFlameGPU[l] = DirectXCommon::GetGPUDescriptorHandle(srvDescriptorHeap, descriptorSizeSRV, 14 + l);
+	}
+
+	std::vector<FlameParticle> flames;
+	flames.reserve(kMaxFlame);
+	float flameAccum = 0.0f;
+
+	// ImGuiで調整するパラメータ
+	bool flameEnabled = true;
+	Vector3 flamePos = { -8.0f, -6.0f, -5.0f }; // 炎の根元
+	float flameRate = 80.0f;      // 毎秒の粒の数
+	float flameLife = 1.2f;       // 粒の寿命(秒)
+	float flameRise = 4.0f;       // 昇る速さ
+	float flameSize = 1.8f;       // 粒の大きさ
+	float flameStretch = 1.5f;    // 縦への伸ばし(1=丸、大きいほど細長い)
+	float flameRadius = 0.8f;     // 根元の広がり
+	float flameSway = 1.0f;       // 横のゆらぎ
+	float flameConverge = 1.0f;   // 上に行くほど中心に寄る強さ(炎の先が尖る)
+	float flameIntensity = 1.0f;  // 全体の明るさ
+	float flameColorOuter[3] = { 1.0f, 0.25f, 0.05f };
+	float flameColorMid[3] = { 1.0f, 0.55f, 0.10f };
+	float flameColorCore[3] = { 1.0f, 0.90f, 0.50f };
+
 
 	// // 入力の初期化
 	input = std::make_unique<Input>();
@@ -1423,6 +1698,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			useDebugCamera = !useDebugCamera;
 		}
 
+		// Zキーでビーム発射(照射中の押し直しでは最初から始めない)
+		if (input->TriggerKey(DIK_Z) && (!beamActive || beamT > kBeamOpenTime + kBeamHoldTime)) {
+			beamActive = true;
+			beamT = 0.0f;
+			beamClock = 0.0f; // 色の変化も最初の色から始める
+		}
+		// Zを押している間(またはHoldがON)は、ビームを撃ち続ける
+		bool beamHeldNow = input->PushKey(DIK_Z) || beamHold;
+
 		// 0キーが押された瞬間（トリガー）に「Hit 0」を出力する
 		if (input->TriggerKey(DIK_0)) {
 			OutputDebugStringA("Hit 0\n");
@@ -1433,16 +1717,72 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
+		// 操作説明(常に画面に表示しておく)
+		ImGui::SetNextWindowPos(ImVec2(10.0f, float(WinApp::kClientHeight) - 10.0f), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+		ImGui::SetNextWindowBgAlpha(0.6f);
+		ImGui::Begin("Controls", nullptr,
+			ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::Text("Z (hold)   : Beam");
+		ImGui::Text("Tab        : Debug Camera ON/OFF");
+		ImGui::Text("W A S D    : Move (Debug Camera)");
+		ImGui::Text("Space/LShift : Up/Down (Debug Camera)");
+		ImGui::Text("Arrow Keys : Rotate (Debug Camera)");
+		ImGui::Text("Settings window : Beam / Flame parameters");
+		ImGui::End();
+
 		ImGui::Begin("Settings");
 
 		ImGui::Checkbox("Use Debug Camera (Tab)", &useDebugCamera);
 
 		// 開いておくノード（DefaultOpen）
 		if (ImGui::TreeNodeEx("Rendering Switch", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox("Draw Particles", &enableParticleDraw);
 			ImGui::Checkbox("Draw Plane", &enablePlaneDraw);
 			ImGui::Checkbox("Draw Model", &enableModelDraw);
 			ImGui::Checkbox("Draw Sphere", &enableSphereDraw);
 			ImGui::Checkbox("Draw Sprite", &enableSpriteDraw);
+			ImGui::TreePop();
+		}
+
+		// 0. ビーム + 着弾火花
+		if (ImGui::TreeNodeEx("Beam", ImGuiTreeNodeFlags_DefaultOpen)) {
+			if (ImGui::Button("Fire (Z)")) {
+				beamActive = true;
+				beamT = 0.0f;
+				beamClock = 0.0f;
+			}
+			ImGui::Checkbox("Hold Fire (continuous)##Beam", &beamHold);
+			ImGui::SliderFloat3("Start##Beam", &beamStart.x, -30.0f, 30.0f);
+			ImGui::SliderFloat3("Target##Beam", &beamTarget.x, -30.0f, 65.0f);
+			ImGui::SliderFloat("Width##Beam", &beamWidth, 0.5f, 15.0f);
+			ImGui::SliderFloat("Intensity##Beam", &beamIntensity, 0.1f, 3.0f);
+			ImGui::ColorEdit3("Outer##Beam", beamColorOuter);
+			ImGui::ColorEdit3("Mid##Beam", beamColorMid);
+			ImGui::ColorEdit3("Core##Beam", beamColorCore);
+			ImGui::SliderFloat("SparkRate##Beam", &sparkRate, 0.0f, 600.0f);
+			ImGui::SliderFloat("SparkSpeed##Beam", &sparkSpeed, 1.0f, 40.0f);
+			ImGui::SliderFloat("SparkSize##Beam", &sparkSize, 0.1f, 3.0f);
+			ImGui::SliderFloat("SparkGravity##Beam", &sparkGravity, -30.0f, 10.0f);
+			ImGui::TreePop();
+		}
+
+		// 0.5 炎
+		if (ImGui::TreeNodeEx("Flame", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox("Enable##Flame", &flameEnabled);
+			ImGui::SliderFloat3("Position##Flame", &flamePos.x, -30.0f, 30.0f);
+			ImGui::SliderFloat("Rate##Flame", &flameRate, 0.0f, 250.0f);
+			ImGui::SliderFloat("Life##Flame", &flameLife, 0.3f, 3.0f);
+			ImGui::SliderFloat("RiseSpeed##Flame", &flameRise, 0.5f, 15.0f);
+			ImGui::SliderFloat("Size##Flame", &flameSize, 0.3f, 5.0f);
+			ImGui::SliderFloat("Stretch##Flame", &flameStretch, 1.0f, 3.0f);
+			ImGui::SliderFloat("Radius##Flame", &flameRadius, 0.0f, 3.0f);
+			ImGui::SliderFloat("Sway##Flame", &flameSway, 0.0f, 5.0f);
+			ImGui::SliderFloat("Converge##Flame", &flameConverge, 0.0f, 3.0f);
+			ImGui::SliderFloat("Intensity##Flame", &flameIntensity, 0.1f, 4.0f);
+			ImGui::ColorEdit3("Outer##Flame", flameColorOuter);
+			ImGui::ColorEdit3("Mid##Flame", flameColorMid);
+			ImGui::ColorEdit3("Core##Flame", flameColorCore);
 			ImGui::TreePop();
 		}
 
@@ -1549,6 +1889,190 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			instancingData[index].World = worldMat;
 		}
 
+		// =========================================================
+		// ビーム + 着弾火花の更新
+		// =========================================================
+		{
+			const float dt = 1.0f / 60.0f; // FPS固定(60)なので1/60で進める
+
+			// カメラのワールド行列(通常カメラ・デバッグカメラ共通でビュー行列の逆行列から取る)
+			Matrix4x4 camWorld = Matrix4x4::Inverse(viewMatrix);
+			Vector3 camPos = { camWorld.m[3][0], camWorld.m[3][1], camWorld.m[3][2] };
+
+			// 発射位置 → 着弾点 から向きと長さを決める
+			Vector3 toTarget = beamTarget.Subtract(beamStart);
+			float beamLength = toTarget.Length();
+			Vector3 dir = toTarget.Normalize();
+			if (dir.Length() < 0.5f) { dir = Vector3(0.0f, 0.0f, 1.0f); beamLength = 1.0f; } // 0ベクトル対策
+			Vector3 hitPos = beamTarget;
+
+			// 着弾点がカメラから遠いと火花が小さく見えるので、距離に応じて大きさ・速さを補正
+			float fxScale = hitPos.Subtract(camPos).Length() / 30.0f;
+			if (fxScale < 1.0f) { fxScale = 1.0f; }
+
+			float env = 0.0f;
+			if (beamActive) {
+				beamT += dt;
+				beamClock += dt;
+				if (beamHeldNow && beamT > kBeamOpenTime + kBeamHoldTime) {
+					beamT = kBeamOpenTime + kBeamHoldTime; // 照射状態のまま止めておく(閉じない)
+				}
+				if (beamT > kBeamOpenTime + kBeamHoldTime + kBeamCloseTime) {
+					beamActive = false;
+				}
+				env = BeamEnvelope(beamT);
+			}
+
+			if (beamActive) {
+				float shake = 1.0f + 0.04f * sinf(beamClock * 47.0f) + 0.03f * sinf(beamClock * 83.0f);
+
+				// --- ビーム: 縁の帯1枚 + グロー(幅違いを12枚重ねる) + 芯1枚 ---
+				// グローは、画像のぼかしではなく「幅の違う板を重ねて加算合成」で作る。
+				// 中心ほど重なる枚数が多くなるので、中心が明るく外へ向かって薄くなるグラデーションになる
+				{
+					Matrix4x4 w = MakeBeamMatrix(beamStart, dir, beamLength, beamWidth * 1.0f * env * shake, camPos);
+					fxData[0].World = w;
+					fxData[0].WVP = Matrix4x4::Multiply(w, viewProjectionMatrix);
+				}
+				for (uint32_t i = 0; i < kBeamGlowLayers; ++i) {
+					float rate = 0.8f * float(i + 1) / float(kBeamGlowLayers); // 細い板から太い板まで
+					Matrix4x4 w = MakeBeamMatrix(beamStart, dir, beamLength, beamWidth * rate * env * shake, camPos);
+					fxData[kFxGlowOffset + i].World = w;
+					fxData[kFxGlowOffset + i].WVP = Matrix4x4::Multiply(w, viewProjectionMatrix);
+				}
+				{
+					Matrix4x4 w = MakeBeamMatrix(beamStart, dir, beamLength, beamWidth * 0.12f * env * shake, camPos);
+					fxData[kFxCoreOffset].World = w;
+					fxData[kFxCoreOffset].WVP = Matrix4x4::Multiply(w, viewProjectionMatrix);
+				}
+
+				// 色(ImGuiの値を反映)。時間で色が変わることはない
+				matBeamOuter.data->color = { beamColorOuter[0], beamColorOuter[1], beamColorOuter[2], beamIntensity };
+				matBeamMid.data->color = { beamColorMid[0], beamColorMid[1], beamColorMid[2], beamIntensity * 2.0f / float(kBeamGlowLayers) }; // 重なる枚数で割って、重ねたときの明るさを保つ
+				matBeamCore.data->color = { beamColorCore[0], beamColorCore[1], beamColorCore[2], beamIntensity };
+
+				// --- 光球2枚: 発射口 / 着弾点 ---
+				float pulse = 1.0f + 0.1f * sinf(beamClock * 40.0f);
+				Matrix4x4 muzzle = MakeBillboardMatrix(beamStart, beamWidth * 1.5f * env * pulse, camWorld);
+				Matrix4x4 impact = MakeBillboardMatrix(hitPos, beamWidth * 3.0f * env * pulse, camWorld);
+				fxData[kFxOrbOffset + 0].World = muzzle;
+				fxData[kFxOrbOffset + 0].WVP = Matrix4x4::Multiply(muzzle, viewProjectionMatrix);
+				fxData[kFxOrbOffset + 1].World = impact;
+				fxData[kFxOrbOffset + 1].WVP = Matrix4x4::Multiply(impact, viewProjectionMatrix);
+
+				// --- 着弾点から火花を出す ---
+				if (env > 0.5f) {
+					sparkAccum += sparkRate * dt;
+					while (sparkAccum >= 1.0f) {
+						sparkAccum -= 1.0f;
+						if (sparks.size() >= kMaxSparks) { continue; }
+
+						Vector3 side = Vector3(randRange(-1.0f, 1.0f), randRange(-1.0f, 1.0f), randRange(-1.0f, 1.0f)).Normalize();
+						Vector3 back = dir.Multiply(-randRange(0.2f, 1.0f)); // ビームの逆方向へ跳ね返る
+						Vector3 velDir = back.Add(side.Multiply(randRange(0.5f, 1.2f))).Normalize();
+
+						Spark s;
+						s.pos = hitPos.Add(side.Multiply(beamWidth * 0.3f * randRange(0.0f, 1.0f)));
+						s.vel = velDir.Multiply(sparkSpeed * fxScale * randRange(0.4f, 1.2f));
+						s.maxLife = randRange(0.4f, 0.9f);
+						s.life = s.maxLife;
+						s.size = sparkSize * fxScale * randRange(0.5f, 1.2f);
+						sparks.push_back(s);
+					}
+				}
+			}
+
+			// --- 火花の移動と寿命(ビームが終わっても飛んでいる分は動かし続ける) ---
+			for (size_t i = 0; i < sparks.size();) {
+				Spark& s = sparks[i];
+				s.life -= dt;
+				if (s.life <= 0.0f) {
+					s = sparks.back();
+					sparks.pop_back();
+					continue;
+				}
+				s.vel.y += sparkGravity * dt;
+				s.vel = s.vel.Multiply(1.0f - 1.5f * dt); // 空気抵抗
+				s.pos = s.pos.Add(s.vel.Multiply(dt));
+				++i;
+			}
+			for (size_t i = 0; i < sparks.size(); ++i) {
+				float size = sparks[i].size * (sparks[i].life / sparks[i].maxLife); // 小さくなって消える
+				Matrix4x4 w = MakeBillboardMatrix(sparks[i].pos, size, camWorld);
+				fxData[kFxSparkOffset + i].World = w;
+				fxData[kFxSparkOffset + i].WVP = Matrix4x4::Multiply(w, viewProjectionMatrix);
+			}
+		}
+
+		// =========================================================
+		// 炎の更新
+		// =========================================================
+		{
+			const float dt = 1.0f / 60.0f;
+			const float kTwoPi = 6.2831853f;
+			Matrix4x4 camWorldFlame = Matrix4x4::Inverse(viewMatrix);
+
+			// --- 粒を出す(根元の円の中のランダムな位置から) ---
+			if (flameEnabled) {
+				flameAccum += flameRate * dt;
+				while (flameAccum >= 1.0f) {
+					flameAccum -= 1.0f;
+					if (flames.size() >= kMaxFlame) { continue; }
+
+					float ang = randRange(0.0f, kTwoPi);
+					float rad = flameRadius * std::sqrt(randRange(0.0f, 1.0f));
+
+					FlameParticle f;
+					f.pos = Vector3(flamePos.x + std::cos(ang) * rad, flamePos.y, flamePos.z + std::sin(ang) * rad);
+					f.vel = Vector3(0.0f, flameRise * randRange(0.7f, 1.3f), 0.0f);
+					f.maxLife = flameLife * randRange(0.7f, 1.0f);
+					f.life = f.maxLife;
+					f.size = flameSize * randRange(0.8f, 1.2f);
+					f.seed = randRange(0.0f, kTwoPi);
+					flames.push_back(f);
+				}
+			}
+
+			// --- 粒の移動と寿命 ---
+			for (size_t i = 0; i < flames.size();) {
+				FlameParticle& f = flames[i];
+				f.life -= dt;
+				if (f.life <= 0.0f) {
+					f = flames.back();
+					flames.pop_back();
+					continue;
+				}
+				float age = f.maxLife - f.life;
+				f.pos.y += f.vel.y * dt;
+				f.pos.x += std::sin(age * 6.0f + f.seed) * flameSway * dt;       // 横にゆらゆら
+				f.pos.z += std::cos(age * 5.0f + f.seed) * flameSway * dt;
+				f.pos.x += (flamePos.x - f.pos.x) * flameConverge * dt;          // 上ほど中心へ寄る
+				f.pos.z += (flamePos.z - f.pos.z) * flameConverge * dt;
+				++i;
+			}
+
+			// --- 色(ImGuiの値を反映) ---
+			const float layerAlpha[3] = { 0.25f, 0.35f, 0.50f };
+			FxMaterial* flameMats[3] = { &matFlameOuter, &matFlameMid, &matFlameCore };
+			const float* flameCols[3] = { flameColorOuter, flameColorMid, flameColorCore };
+			for (int l = 0; l < 3; ++l) {
+				flameMats[l]->data->color = { flameCols[l][0], flameCols[l][1], flameCols[l][2], layerAlpha[l] * flameIntensity };
+			}
+
+			// --- 行列: 1粒を 外側/中間/芯 の3層で重ねる。縮むと外側(赤)から消えて芯(黄)が残る ---
+			const float layerScale[3] = { 1.0f, 0.65f, 0.35f };
+			for (size_t i = 0; i < flames.size(); ++i) {
+				float k = flames[i].life / flames[i].maxLife;  // 1→0
+				float shrink = std::pow(k, 0.7f);
+				for (uint32_t l = 0; l < 3; ++l) {
+					float size = flames[i].size * layerScale[l] * shrink;
+					Matrix4x4 w = MakeBillboardMatrix(flames[i].pos, size, camWorldFlame, size * flameStretch);
+					flameData[l * kMaxFlame + i].World = w;
+					flameData[l * kMaxFlame + i].WVP = Matrix4x4::Multiply(w, viewProjectionMatrix);
+				}
+			}
+		}
+
 		// 球体 (Sphere) の行列計算
 		Matrix4x4 worldMatrixSphere = Matrix4x4::MakeAffineMatrix(sphereTransform.scale, sphereTransform.rotate, sphereTransform.translate);
 		wvpDataSphere->WVP = Matrix4x4::Multiply(worldMatrixSphere, viewProjectionMatrix);
@@ -1594,7 +2118,42 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 平面メッシュの頂点バッファを使って Instancing 描画を発行 
 		commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		commandList->DrawInstanced(UINT(planeVertices.size()), kNumInstance, 0, 0);
+		if (enableParticleDraw) {
+			commandList->DrawInstanced(UINT(planeVertices.size()), kNumInstance, 0, 0);
+		}
+
+		// =========================================================
+		// ビーム + 火花の描画 : 既存Particleのシェーダーで加算合成・深度書き込みなし
+		// =========================================================
+		if (beamActive || !sparks.empty() || !flames.empty()) {
+			commandList->SetPipelineState(fxPipelineState.Get());
+			commandList->SetGraphicsRootSignature(particleRootSignature.Get());
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+			auto drawFx = [&](const FxMaterial& mat, D3D12_GPU_DESCRIPTOR_HANDLE instanceSrv,
+				D3D12_GPU_DESCRIPTOR_HANDLE texture, UINT instanceCount) {
+				commandList->SetGraphicsRootConstantBufferView(0, mat.resource->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootDescriptorTable(1, instanceSrv);
+				commandList->SetGraphicsRootDescriptorTable(2, texture);
+				commandList->DrawInstanced(UINT(planeVertices.size()), instanceCount, 0, 0);
+			};
+
+			if (beamActive) {
+				drawFx(matBeamOuter, srvBeamOuterGPU, texEdgeGPU, 1);
+				drawFx(matBeamMid, srvBeamMidGPU, texWhiteGPU, kBeamGlowLayers);
+				drawFx(matBeamCore, srvBeamCoreGPU, texWhiteGPU, 1);
+				drawFx(matOrb, srvOrbGPU, texSparkGPU, 2);
+			}
+			if (!sparks.empty()) {
+				drawFx(matSpark, srvSparkGPU, texSparkGPU, UINT(sparks.size()));
+			}
+			if (!flames.empty()) {
+				drawFx(matFlameOuter, srvFlameGPU[0], texFlameGPU, UINT(flames.size()));
+				drawFx(matFlameMid, srvFlameGPU[1], texFlameGPU, UINT(flames.size()));
+				drawFx(matFlameCore, srvFlameGPU[2], texFlameGPU, UINT(flames.size()));
+			}
+		}
 
 		commandList->SetPipelineState(graphicsPipelineState.Get());
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
