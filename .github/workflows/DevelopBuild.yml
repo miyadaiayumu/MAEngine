@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  SOLUTION_FILE_PATH: project/MAEngine.slnx
+  SOLUTION_FILE_PATH: MAEngine/MAEngine.slnx
   CONFIGURATION: Development
 
 jobs:
