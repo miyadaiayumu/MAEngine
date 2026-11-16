@@ -101,10 +101,10 @@
     <FxCompile Include="resources\shaders\Object3d.VS.hlsl">
       <Filter>resources\shaders</Filter>
     </FxCompile>
-    <FxCompile Include="resources\shaders\Particle.PS.hlsl">
+    <FxCompile Include="resources\shaders\Particle.VS.hlsl">
       <Filter>resources\shaders</Filter>
     </FxCompile>
-    <FxCompile Include="resources\shaders\Particle.VS.hlsl">
+    <FxCompile Include="resources\shaders\Particle.PS.hlsl">
       <Filter>resources\shaders</Filter>
     </FxCompile>
   </ItemGroup>
