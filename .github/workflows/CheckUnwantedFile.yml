@@ -1,0 +1,45 @@
+name: CheckUnnecessaryFiles
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find unnecessary files
+        shell: bash
+        run: |
+          # 検索条件を組み立てる(最初の -o は後で削除)
+          NAMES=""
+          for pattern in "*.pdb" "*.obj" "*.ilk" "*.exe" "*.pch" "*.idb" "*.ipdb" "*.iobj" "*.tlog" "*.log" "*.user" "*.ncb" "*.sdf" "*.suo" "*.ini"; do
+            NAMES="$NAMES -o -name $pattern"
+          done
+          NAMES="${NAMES# -o }"
+
+          # 不要なディレクトリ名
+          DIRS=""
+          for dir in ".vs" "x64" "Debug" "Release" "generated" "Generated" "logs" "Bin"; do
+            DIRS="$DIRS -o -name $dir"
+          done
+          DIRS="${DIRS# -o }"
+
+          # .git と .github は検索対象から外す
+          FILES=$(eval "find . -path ./.git -prune -o -path ./.github -prune -o -type f \( $NAMES \) -print")
+          FOLDERS=$(eval "find . -path ./.git -prune -o -path ./.github -prune -o -type d \( $DIRS \) -print")
+
+          if [ -n "$FILES" ] || [ -n "$FOLDERS" ]; then
+            echo "Error: 不要なファイルまたはディレクトリが見つかりました!"
+            echo "$FOLDERS"
+            echo "$FILES"
+            exit 1
+          fi
+
+          echo "不要なファイルはありませんでした"
