@@ -818,7 +818,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ========================
 	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob;
 	vertexShaderBlob.Attach(CompileShader(
-		L"Object3d.VS.hlsl",
+		L"resources/shaders/Object3d.VS.hlsl",
 		L"vs_6_0",
 		dxcUtils.Get(),
 		dxcCompiler.Get(),
@@ -827,7 +827,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlob;
 	pixelShaderBlob.Attach(CompileShader(
-		L"Object3d.PS.hlsl",
+		L"resources/shaders/Object3d.PS.hlsl",
 		L"ps_6_0",
 		dxcUtils.Get(),
 		dxcCompiler.Get(),
@@ -1027,7 +1027,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	// ================================================
 	Microsoft::WRL::ComPtr<IDxcBlob> particleVSBlob;
 	particleVSBlob.Attach(CompileShader(
-		L"Particle.VS.hlsl",
+		L"resources/shaders/Particle.VS.hlsl",
 		L"vs_6_0",
 		dxcUtils.Get(),
 		dxcCompiler.Get(),
@@ -1036,7 +1036,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Microsoft::WRL::ComPtr<IDxcBlob> particlePSBlob;
 	particlePSBlob.Attach(CompileShader(
-		L"Particle.PS.hlsl",
+		L"resources/shaders/Particle.PS.hlsl",
 		L"ps_6_0",
 		dxcUtils.Get(),
 		dxcCompiler.Get(),

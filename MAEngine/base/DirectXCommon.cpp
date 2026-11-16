@@ -1,7 +1,7 @@
 #include "DirectXCommon.h"
-#include "WinApp.h"
-#include "Logger.h"
-#include "StringUtility.h"
+#include "base/WinApp.h"
+#include "base/Logger.h"
+#include "utility/StringUtility.h"
 #include "externals/DirectXTex/d3dx12.h"
 #include <cassert>
 #include <format>
