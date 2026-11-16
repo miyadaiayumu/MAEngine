@@ -8,7 +8,7 @@ on:
 
 env:
   # リポジトリのルートディレクトリを基点としたソリューションファイルのパス
-  SOLUTION_FILE_PATH: project/MAEngine.slnx
+  SOLUTION_FILE_PATH: MAEngine/MAEngine.slnx
   # Visual Studio の構成(Debug / Release)
   CONFIGURATION: Debug
 
