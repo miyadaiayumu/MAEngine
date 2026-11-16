@@ -21,14 +21,14 @@
 #include <vector>
 #include <cmath>
 #include<random> 
-#include"Matrix4x4.h"
-#include"Vector3.h"
-#include"Input.h"
-#include"DebugCamera.h"
-#include"WinApp.h"
-#include"DirectXCommon.h"
-#include"Logger.h"
-#include"StringUtility.h"
+#include"math/Matrix4x4.h"
+#include"math/Vector3.h"
+#include"base/Input.h"
+#include"3d/DebugCamera.h"
+#include"base/WinApp.h"
+#include"base/DirectXCommon.h"
+#include"base/Logger.h"
+#include"utility/StringUtility.h"
 
 #ifdef USE_IMGUI
 #include"externals/imgui/imgui.h"

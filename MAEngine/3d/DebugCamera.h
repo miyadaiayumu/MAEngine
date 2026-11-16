@@ -1,6 +1,6 @@
 #pragma once
-#include "Matrix4x4.h"
-#include "Vector3.h"
+#include "math/Matrix4x4.h"
+#include "math/Vector3.h"
 #include <Windows.h>
 
 class DebugCamera

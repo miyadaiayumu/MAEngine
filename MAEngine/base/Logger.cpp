@@ -1,5 +1,5 @@
 #include "Logger.h"
-#include "StringUtility.h"
+#include "utility/StringUtility.h"
 #include <Windows.h>
 #include <chrono>
 #include <ctime>

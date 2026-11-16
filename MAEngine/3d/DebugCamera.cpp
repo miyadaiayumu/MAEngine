@@ -1,6 +1,6 @@
 #include "DebugCamera.h"
-#include "Matrix4x4.h"
-#include "WinApp.h"
+#include "math/Matrix4x4.h"
+#include "base/WinApp.h"
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h> // DIK_W 等の定数を使用するため
 #include <cstdint>
