@@ -151,6 +151,12 @@
     <ClInclude Include="utility\StringUtility.h">
       <Filter>ソース ファイル\engine\utility</Filter>
     </ClInclude>
+    <ClInclude Include="math\Matrix4x4.h">
+      <Filter>ソース ファイル\engine\math</Filter>
+    </ClInclude>
+    <ClInclude Include="math\Vector3.h">
+      <Filter>ソース ファイル\engine\math</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="externals\imgui\LICENSE.txt">
